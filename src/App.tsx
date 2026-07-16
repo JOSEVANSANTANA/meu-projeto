@@ -85,7 +85,7 @@ export default function App() {
       <div className="flex flex-wrap items-center gap-3 border-b border-terminal-border px-4 py-1.5">
         <SeverityFilter active={filter} counts={counts} onChange={setFilter} />
         <span className="ml-auto text-[10px] text-terminal-dim">
-          FED · MARKETWATCH · CNBC · YAHOO FINANCE
+          FED · MARKETWATCH · CNBC · YAHOO FINANCE · TRUTH SOCIAL
         </span>
       </div>
 

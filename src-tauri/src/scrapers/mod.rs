@@ -1,6 +1,6 @@
-pub mod financial_juice;
 pub mod investing;
 pub mod rss;
+pub mod truth_social;
 
 use rand::Rng;
 use std::time::Duration;

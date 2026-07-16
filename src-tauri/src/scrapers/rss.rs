@@ -79,9 +79,11 @@ pub async fn fetch_all() -> Result<Vec<RawNewsItem>> {
     Ok(items)
 }
 
-async fn fetch_one(source: &str, url: &str) -> Result<Vec<RawNewsItem>> {
+/// Busca e parseia um feed RSS/Atom, devolvendo os títulos crus (sem filtro).
+/// Reutilizado por outros conectores (ex.: Truth Social) que aplicam o próprio
+/// critério de relevância.
+pub(crate) async fn fetch_titles(url: &str) -> Result<Vec<String>> {
     polite_delay().await; // anti-bot: 2–5s aleatórios antes de cada request
-
     let client = browser_client()?;
     let xml = client
         .get(url)
@@ -90,9 +92,13 @@ async fn fetch_one(source: &str, url: &str) -> Result<Vec<RawNewsItem>> {
         .error_for_status()?
         .text()
         .await?;
+    Ok(extract_titles(&xml))
+}
 
+async fn fetch_one(source: &str, url: &str) -> Result<Vec<RawNewsItem>> {
     let now = chrono::Utc::now().to_rfc3339();
-    let items = extract_titles(&xml)
+    let items = fetch_titles(url)
+        .await?
         .into_iter()
         .filter(|h| !h.is_empty() && is_high_impact_headline(h))
         .take(10)

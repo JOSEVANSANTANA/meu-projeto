@@ -76,10 +76,10 @@ pub async fn run_loop(app: AppHandle, gemini: Arc<GeminiClient>) {
             Err(e) => log::warn!("Feeds RSS falharam neste ciclo: {e:#}"),
         }
 
-        // Manchetes rápidas opcionais (Truth Social via RSS, se configurado).
-        match scrapers::financial_juice::fetch_headlines().await {
+        // Truth Social: espelho do Trump (ligado) + conector logado (opcional).
+        match scrapers::truth_social::fetch_all().await {
             Ok(mut v) => batch.append(&mut v),
-            Err(e) => log::warn!("Feeds de manchetes rápidas falharam neste ciclo: {e:#}"),
+            Err(e) => log::warn!("Truth Social falhou neste ciclo: {e:#}"),
         }
 
         // Investing.com fica atrás do Cloudflare e retorna 403 a scrapers
