@@ -3,6 +3,7 @@ mod engine;
 mod gemini;
 mod instruments;
 mod models;
+mod prices;
 mod scrapers;
 
 use db::Database;
@@ -60,6 +61,13 @@ fn set_priority_asset(
     Ok(resolved)
 }
 
+/// Command: placar de acerto da IA (autoaprendizagem).
+#[tauri::command]
+fn get_accuracy(state: tauri::State<'_, AppState>) -> Result<db::AccuracyStats, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.accuracy_stats().map_err(|e| e.to_string())
+}
+
 /// Command: estado de configuração para a UI (nº de chaves, chave ativa, ativo).
 #[tauri::command]
 fn get_runtime_status(state: tauri::State<'_, AppState>) -> RuntimeStatus {
@@ -85,6 +93,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             // SQLite + .env também no diretório de dados do app (%APPDATA%).
             let data_dir = app.path().app_data_dir()?;
@@ -119,7 +128,8 @@ pub fn run() {
             get_recent_events,
             add_api_key,
             set_priority_asset,
-            get_runtime_status
+            get_runtime_status,
+            get_accuracy
         ])
         .run(tauri::generate_context!())
         .expect("erro ao iniciar a aplicação Tauri");

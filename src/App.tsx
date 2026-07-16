@@ -6,6 +6,7 @@ import { ControlBar } from "./components/ControlBar";
 import { SeverityFilter } from "./components/SeverityFilter";
 import { PriceLevels } from "./components/PriceLevels";
 import { SentimentPies } from "./components/SentimentPies";
+import { Scoreboard } from "./components/Scoreboard";
 import { useNewsStream } from "./hooks/useNewsStream";
 import { registerNotificationClickFocus } from "./lib/nativeAlerts";
 import type { RuntimeStatus, SeverityFilter as Filter } from "./types";
@@ -80,6 +81,9 @@ export default function App() {
 
       {/* Pizzas de sentimento com filtro de tempo por pizza */}
       <SentimentPies events={assetEvents} />
+
+      {/* Placar de acerto da IA (autoaprendizagem) */}
+      <Scoreboard />
 
       {/* Filtro por severidade + fontes */}
       <div className="flex flex-wrap items-center gap-3 border-b border-terminal-border px-4 py-1.5">

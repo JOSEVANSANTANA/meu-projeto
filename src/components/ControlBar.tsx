@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { checkForUpdates } from "../lib/updater";
 import type { AssetResolution, RuntimeStatus } from "../types";
 
 /**
@@ -91,8 +92,15 @@ export function ControlBar({
         />
       </label>
 
-      {/* Nova API key — topo direito */}
+      {/* Verificar atualizações + Nova API key — topo direito */}
       <div className="ml-auto flex items-center gap-2">
+        <button
+          onClick={async () => flash(await checkForUpdates())}
+          title="Verificar atualizações"
+          className="rounded-sm border border-terminal-border px-2 py-1 text-terminal-dim hover:border-terminal-amber hover:text-terminal-amber"
+        >
+          ⟳ UPDATE
+        </button>
         {msg && (
           <span
             className={

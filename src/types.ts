@@ -36,3 +36,20 @@ export interface AssetResolution {
   name: string;
   recognized: boolean;
 }
+
+/** Acerto por nível de impacto. */
+export interface ImpactAccuracy {
+  impact_level: string;
+  hits: number;
+  total: number;
+}
+
+/** Placar de acerto da IA (autoaprendizagem). */
+export interface AccuracyStats {
+  hits: number;
+  scored: number;
+  hit_rate: number;
+  /** >1 = a IA SUBESTIMA a magnitude; <1 = SUPERESTIMA. */
+  magnitude_factor: number;
+  by_impact: ImpactAccuracy[];
+}

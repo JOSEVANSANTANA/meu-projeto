@@ -134,3 +134,49 @@ npm run tauri build
   `src-tauri/src/scrapers/`.
 - **RAM**: o backend é 100% Rust (sem Chromium embutido como no Electron);
   consumo típico < 150 MB.
+
+## Autoaprendizagem (placar de acerto)
+
+O motor mede a própria precisão e se calibra sozinho:
+
+1. Ao analisar uma notícia, grava o **preço-base** do ativo (Yahoo Finance,
+   grátis; símbolos `ES=F`, `NQ=F`, `YM=F`, `RTY=F`, `EMD=F`, `NIY=F`).
+2. Após `SCORE_HORIZON_SECS` (padrão 20 min), compara o **movimento real** com
+   a direção prevista → marca acerto/erro e o erro de magnitude.
+3. Agrega tudo num **Placar IA** (taxa de acerto de direção, viés de magnitude,
+   acerto por nível de impacto) mostrado no dashboard.
+4. Realimenta esse histórico no *system prompt* do Gemini (aprendizado em
+   contexto): "você superestima a magnitude ~1.4x, ajuste". Não é fine-tuning —
+   é um laço de feedback honesto e verificável.
+
+> A cotação do Yahoo tem atraso (~10-15 min): serve para MEDIR acertos, não
+> para execução ao vivo. Para preço em tempo real, integre a API do seu broker.
+
+## Auto-update (publicação de novas versões)
+
+O cliente de atualização já está embutido (botão **⟳ UPDATE** no topo). Para
+ativá-lo de verdade você precisa publicar releases assinados:
+
+1. Gere um par de chaves de assinatura (guarde a privada com segurança):
+   ```bash
+   npm run tauri signer generate -- -w %USERPROFILE%\.tauri\esf.key
+   ```
+2. Em `src-tauri/tauri.conf.json`, adicione a seção do updater com a **chave
+   pública** impressa e o endpoint dos seus releases (ex.: GitHub Releases):
+   ```json
+   "plugins": {
+     "updater": {
+       "pubkey": "SUA_CHAVE_PUBLICA",
+       "endpoints": ["https://github.com/<voce>/<repo>/releases/latest/download/latest.json"]
+     }
+   },
+   "bundle": { "createUpdaterArtifacts": true }
+   ```
+3. No build, exporte `TAURI_SIGNING_PRIVATE_KEY` (e a senha) para assinar:
+   ```bash
+   set TAURI_SIGNING_PRIVATE_KEY=...   & npm run tauri build
+   ```
+4. Publique os artefatos (`.msi`, `.sig`) + o `latest.json` no endpoint.
+
+Sem essa configuração, o botão apenas informa que não há atualização —
+não quebra o app nem o build.

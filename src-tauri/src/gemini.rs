@@ -8,9 +8,14 @@ use std::time::{Duration, Instant};
 /// prioritário escolhido pelo usuário (ES/NQ/etc.), mas o schema de saída é
 /// sempre o mesmo. A regra central: analisar SÓ o que está no texto — nunca
 /// inventar números, consenso ou eventos.
-fn system_prompt(asset: &str) -> String {
+fn system_prompt(asset: &str, learning: &str) -> String {
+    let learning_block = if learning.trim().is_empty() {
+        String::new()
+    } else {
+        format!("\n\nAPRENDIZADO (histórico REAL de acertos desta sessão — ajuste-se a ele):\n{learning}")
+    };
     format!(
-        r#"Você é um motor de análise quantitativa de notícias macroeconômicas focado no ATIVO PRIORITÁRIO desta sessão: {asset}.
+        r#"Você é um motor de análise quantitativa de notícias macroeconômicas focado no ATIVO PRIORITÁRIO desta sessão: {asset}.{learning_block}
 
 REGRAS ABSOLUTAS — VIOLAÇÃO NÃO É PERMITIDA:
 1. Responda ESTRITAMENTE com um único objeto JSON válido. Sem markdown, sem cercas de código, sem texto antes ou depois.
@@ -83,6 +88,8 @@ pub struct GeminiClient {
     keys: Mutex<Vec<String>>,
     active_key: Mutex<usize>,
     asset: Mutex<String>,
+    /// Texto de aprendizado (histórico de acertos) injetado no prompt.
+    learning: Mutex<String>,
 }
 
 enum CallError {
@@ -168,7 +175,16 @@ impl GeminiClient {
             keys: Mutex::new(keys),
             active_key: Mutex::new(0),
             asset: Mutex::new(asset),
+            learning: Mutex::new(String::new()),
         })
+    }
+
+    pub fn set_learning(&self, text: &str) {
+        *self.learning.lock().expect("learning mutex") = text.to_string();
+    }
+
+    fn learning(&self) -> String {
+        self.learning.lock().expect("learning mutex").clone()
     }
 
     // ---- Configuração em runtime (usada pelos commands da UI) ----------------
@@ -275,7 +291,7 @@ impl GeminiClient {
     pub async fn calibrate(&self) -> Result<String> {
         let api_key = self.current_key();
         let probe_body = json!({
-            "system_instruction": { "parts": [{ "text": system_prompt(&self.asset()) }] },
+            "system_instruction": { "parts": [{ "text": system_prompt(&self.asset(), &self.learning()) }] },
             "contents": [{
                 "role": "user",
                 "parts": [{ "text": "Teste de disponibilidade. FONTE: teste; EVENTO/MANCHETE: ping; ATUAL: N/A; PROJEÇÃO: N/A; ANTERIOR: N/A. Responda com o JSON exigido." }]
@@ -384,7 +400,7 @@ impl GeminiClient {
         );
 
         let body = json!({
-            "system_instruction": { "parts": [{ "text": system_prompt(&asset) }] },
+            "system_instruction": { "parts": [{ "text": system_prompt(&asset, &self.learning()) }] },
             "contents": [{ "role": "user", "parts": [{ "text": user_context }] }],
             "generationConfig": {
                 "temperature": 0.0,
