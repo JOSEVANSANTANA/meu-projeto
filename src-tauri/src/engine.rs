@@ -35,24 +35,6 @@ pub async fn run_loop(app: AppHandle, gemini: Arc<GeminiClient>) {
 
     log::info!("Motor de ingestão iniciado (ciclo base: {base_interval}s)");
 
-    // Diagnóstico + CALIBRAÇÃO. Primeiro lista os modelos da chave (informativo);
-    // depois sonda e trava num modelo que comprovadamente responde 200. Isso
-    // elimina os 404 em operação — o ponto central da robustez.
-    gemini.log_available_models().await;
-    match gemini.calibrate().await {
-        Ok(model) => {
-            log::info!("Motor ONLINE usando modelo Gemini '{model}'");
-            let _ = app.emit("engine-status", "ONLINE");
-        }
-        Err(e) => {
-            log::error!("Gemini sem modelo utilizável para esta chave: {e:#}");
-            let _ = app.emit(
-                "engine-error",
-                format!("Nenhum modelo Gemini utilizável para esta chave: {e}"),
-            );
-        }
-    }
-
     // Teto de análises por ciclo: suaviza rajadas (evita 429 no nível gratuito).
     let max_per_cycle: usize = std::env::var("MAX_ANALYSES_PER_CYCLE")
         .ok()
@@ -63,8 +45,39 @@ pub async fn run_loop(app: AppHandle, gemini: Arc<GeminiClient>) {
     let mut fail_counts: HashMap<String, u32> = HashMap::new();
     // Falhas consecutivas (qualquer item) para acionar rotação de chave.
     let mut consecutive_failures: u32 = 0;
+    // Calibra sob demanda: cobre "sem chave no startup" e "chave adicionada
+    // pela UI depois" — enquanto offline, tenta calibrar a cada ciclo.
+    let mut online = false;
 
     loop {
+        // CALIBRAÇÃO (sonda e trava num modelo que responde 200). Só quando há
+        // ao menos uma chave; senão sinaliza à UI e aguarda a chave.
+        if !online {
+            if gemini.has_keys() {
+                gemini.log_available_models().await;
+                match gemini.calibrate().await {
+                    Ok(model) => {
+                        online = true;
+                        log::info!("Motor ONLINE usando modelo Gemini '{model}'");
+                        let _ = app.emit("engine-status", "ONLINE");
+                    }
+                    Err(e) => {
+                        log::error!("Gemini sem modelo utilizável: {e:#}");
+                        let _ = app.emit("engine-error", format!("{e}"));
+                        tokio::time::sleep(Duration::from_secs(base_interval)).await;
+                        continue;
+                    }
+                }
+            } else {
+                let _ = app.emit(
+                    "engine-error",
+                    "Configure a GEMINI_API_KEY (.env ou campo do dashboard).".to_string(),
+                );
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                continue;
+            }
+        }
+
         let mut batch: Vec<RawNewsItem> = Vec::new();
 
         // Pilar 1 — conectores rodam em sequência, cada um com seu
@@ -148,7 +161,9 @@ pub async fn run_loop(app: AppHandle, gemini: Arc<GeminiClient>) {
                             let _ = app.emit("engine-status", "ONLINE");
                         }
                         Err(e) => {
-                            log::error!("Gemini: nova chave sem modelo utilizável: {e:#}")
+                            // Deixa o topo do loop re-tentar a calibração.
+                            online = false;
+                            log::error!("Gemini: nova chave sem modelo utilizável: {e:#}");
                         }
                     }
                 }

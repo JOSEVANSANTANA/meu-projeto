@@ -72,27 +72,32 @@ fn get_runtime_status(state: tauri::State<'_, AppState>) -> RuntimeStatus {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Carrega .env da raiz do projeto (GEMINI_API_KEY etc.)
-    dotenvy::dotenv().ok();
+    // Carrega .env de vários locais para funcionar tanto em `tauri dev` (raiz do
+    // projeto) quanto no app INSTALADO (ao lado do .exe). O primeiro a definir
+    // uma variável vence; os demais só preenchem o que faltar.
+    dotenvy::dotenv().ok(); // diretório atual (dev)
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let _ = dotenvy::from_path(dir.join(".env")); // ao lado do executável
+        }
+    }
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
-            // SQLite no diretório de dados do app (ex.: %APPDATA% no Windows)
+            // SQLite + .env também no diretório de dados do app (%APPDATA%).
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
+            let _ = dotenvy::from_path(data_dir.join(".env"));
             let db = Database::open(&data_dir.join("esf_news.db"))?;
 
-            // Cliente Gemini compartilhado (keys + ativo ajustáveis em runtime).
-            let gemini = match GeminiClient::from_env() {
-                Ok(g) => Arc::new(g),
-                Err(e) => {
-                    // Sem chave o app abre, mas o motor não analisa. Erro vai à UI.
-                    log::error!("Gemini indisponível: {e:#}");
-                    return Err(e.into());
-                }
-            };
+            // Cliente Gemini compartilhado. Tolera ausência de chave no startup:
+            // o app abre, mostra o erro e você pode colar a chave no dashboard.
+            let gemini = Arc::new(GeminiClient::from_env().map_err(|e| {
+                log::error!("Falha ao iniciar cliente Gemini: {e:#}");
+                e
+            })?);
 
             // Normaliza o ativo padrão para o nome canônico do instrumento.
             let resolved = instruments::resolve(&gemini.asset());

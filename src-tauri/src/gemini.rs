@@ -1,5 +1,5 @@
 use crate::models::{GeminiAnalysis, RawNewsItem};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -110,15 +110,19 @@ fn default_models() -> Vec<String> {
 impl GeminiClient {
     pub fn from_env() -> Result<Self> {
         // GEMINI_API_KEY aceita UMA ou VÁRIAS chaves separadas por vírgula.
-        let raw = std::env::var("GEMINI_API_KEY")
-            .context("GEMINI_API_KEY não definida — configure o arquivo .env na raiz do projeto")?;
-        let keys: Vec<String> = raw
+        // Ausência de chave NÃO é fatal: o app abre e você pode colar a chave
+        // no campo do dashboard (o motor fica offline até haver uma chave).
+        let keys: Vec<String> = std::env::var("GEMINI_API_KEY")
+            .unwrap_or_default()
             .split(',')
             .map(|k| k.trim().to_string())
             .filter(|k| !k.is_empty())
             .collect();
         if keys.is_empty() {
-            return Err(anyhow!("GEMINI_API_KEY vazia"));
+            log::warn!(
+                "GEMINI_API_KEY não definida — configure no .env ou cole a chave no dashboard. \
+                 O motor ficará OFFLINE até haver uma chave."
+            );
         }
 
         let mut models: Vec<String> = std::env::var("GEMINI_MODEL")
@@ -182,6 +186,10 @@ impl GeminiClient {
 
     pub fn keys_len(&self) -> usize {
         self.keys.lock().expect("keys mutex").len()
+    }
+
+    pub fn has_keys(&self) -> bool {
+        !self.keys.lock().expect("keys mutex").is_empty()
     }
 
     pub fn active_key_index(&self) -> usize {
