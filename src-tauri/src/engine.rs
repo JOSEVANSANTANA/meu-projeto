@@ -3,10 +3,15 @@ use crate::gemini::GeminiClient;
 use crate::models::RawNewsItem;
 use crate::scrapers;
 use rand::Rng;
+use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
+
+/// Após esta quantidade de falhas seguidas, um item é abandonado na sessão
+/// para não gerar tempestade de retry/consumo de cota a cada ciclo.
+const MAX_ITEM_FAILURES: u32 = 3;
 
 /// Estado global gerenciado pelo Tauri (acessível nos commands).
 pub struct AppState {
@@ -35,11 +40,35 @@ pub async fn run_loop(app: AppHandle) {
 
     log::info!("Motor de ingestão iniciado (ciclo base: {base_interval}s)");
 
-    // Diagnóstico: lista os modelos que a chave realmente pode usar. Se der
-    // 404 nas análises, é aqui que se confere o nome correto do modelo.
+    // Diagnóstico + CALIBRAÇÃO. Primeiro lista os modelos da chave (informativo);
+    // depois sonda e trava num modelo que comprovadamente responde 200. Isso
+    // elimina os 404 em operação — o ponto central da robustez.
     gemini.log_available_models().await;
+    match gemini.calibrate().await {
+        Ok(model) => {
+            log::info!("Motor ONLINE usando modelo Gemini '{model}'");
+            let _ = app.emit("engine-status", "ONLINE");
+        }
+        Err(e) => {
+            // Nenhum modelo utilizável: quase sempre a chave não tem acesso a
+            // generateContent. Sinaliza erro na UI, mas segue tentando por ciclo
+            // (pode se resolver se for cota temporária).
+            log::error!("Gemini sem modelo utilizável para esta chave: {e:#}");
+            let _ = app.emit(
+                "engine-error",
+                format!("Nenhum modelo Gemini utilizável para esta chave: {e}"),
+            );
+        }
+    }
 
-    let _ = app.emit("engine-status", "ONLINE");
+    // Teto de análises por ciclo: suaviza rajadas (evita 429 no nível gratuito).
+    let max_per_cycle: usize = std::env::var("MAX_ANALYSES_PER_CYCLE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(6);
+
+    // Contador de falhas por item (dedup_key -> nº de falhas) entre ciclos.
+    let mut fail_counts: HashMap<String, u32> = HashMap::new();
 
     loop {
         let mut batch: Vec<RawNewsItem> = Vec::new();
@@ -72,8 +101,40 @@ pub async fn run_loop(app: AppHandle) {
             }
         }
 
+        let mut analyzed_this_cycle = 0usize;
         for item in batch {
-            process_item(&app, &gemini, item).await;
+            if analyzed_this_cycle >= max_per_cycle {
+                break; // o restante é reprocessado no próximo ciclo (via dedup)
+            }
+
+            let key = item.dedup_key();
+
+            // Dedup ANTES do Gemini: cada chamada de LLM custa dinheiro/latência.
+            let is_new = {
+                let state = app.state::<AppState>();
+                let db = state.db.lock().expect("db mutex envenenado");
+                db.is_new(&key)
+            };
+            match is_new {
+                Ok(false) => continue,
+                Err(e) => {
+                    log::error!("Falha ao consultar dedup: {e:#}");
+                    continue;
+                }
+                Ok(true) => {}
+            }
+
+            // Abandona itens que já falharam demais (evita retry infinito).
+            if fail_counts.get(&key).copied().unwrap_or(0) >= MAX_ITEM_FAILURES {
+                continue;
+            }
+
+            analyzed_this_cycle += 1;
+            if analyze_and_store(&app, &gemini, &item, &key).await {
+                fail_counts.remove(&key);
+            } else {
+                *fail_counts.entry(key).or_insert(0) += 1;
+            }
         }
 
         // Jitter no intervalo do ciclo: padrão de tráfego não-robótico
@@ -82,29 +143,20 @@ pub async fn run_loop(app: AppHandle) {
     }
 }
 
-async fn process_item(app: &AppHandle, gemini: &GeminiClient, item: RawNewsItem) {
-    let key = item.dedup_key();
-
-    // Dedup ANTES do Gemini: cada chamada de LLM custa dinheiro e latência
-    {
-        let state = app.state::<AppState>();
-        let db = state.db.lock().expect("db mutex envenenado");
-        match db.is_new(&key) {
-            Ok(true) => {}
-            Ok(false) => return,
-            Err(e) => {
-                log::error!("Falha ao consultar dedup: {e:#}");
-                return;
-            }
-        }
-    } // lock liberado antes do await (Mutex std não atravessa await)
-
+/// Analisa um item novo no Gemini, persiste e transmite à UI.
+/// Retorna `true` em sucesso, `false` em qualquer falha (para o contador).
+async fn analyze_and_store(
+    app: &AppHandle,
+    gemini: &GeminiClient,
+    item: &RawNewsItem,
+    key: &str,
+) -> bool {
     // Pilar 2 — análise estruturada no Gemini
-    let analysis = match gemini.analyze(&item).await {
+    let analysis = match gemini.analyze(item).await {
         Ok(a) => a,
         Err(e) => {
             log::error!("Gemini falhou para '{}': {e:#}", item.headline);
-            return;
+            return false;
         }
     };
 
@@ -112,11 +164,11 @@ async fn process_item(app: &AppHandle, gemini: &GeminiClient, item: RawNewsItem)
     let event = {
         let state = app.state::<AppState>();
         let db = state.db.lock().expect("db mutex envenenado");
-        match db.insert(&key, &analysis) {
+        match db.insert(key, &analysis) {
             Ok(ev) => ev,
             Err(e) => {
                 log::error!("Falha ao persistir evento: {e:#}");
-                return;
+                return false;
             }
         }
     };
@@ -134,6 +186,7 @@ async fn process_item(app: &AppHandle, gemini: &GeminiClient, item: RawNewsItem)
     if event.analysis.requires_native_alert() {
         fire_native_alert(app, &event.analysis);
     }
+    true
 }
 
 fn fire_native_alert(app: &AppHandle, a: &crate::models::GeminiAnalysis) {

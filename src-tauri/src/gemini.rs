@@ -75,12 +75,21 @@ enum CallError {
     Transient(anyhow::Error),
 }
 
-/// Modelos padrão tentados em cascata (nomes atuais da API Gemini).
+/// Modelos candidatos, em ordem de preferência (todos da família flash —
+/// baixa latência/custo). O startup sonda cada um e TRAVA no primeiro que
+/// responder 200 para esta chave, então a ordem só define a preferência.
 fn default_models() -> Vec<String> {
-    ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest", "gemini-2.5-flash-lite"]
-        .iter()
-        .map(|s| s.to_string())
-        .collect()
+    [
+        "gemini-flash-latest",   // alias estável -> flash atual
+        "gemini-2.0-flash",      // comprovadamente presente nesta chave
+        "gemini-2.0-flash-001",
+        "gemini-flash-lite-latest",
+        "gemini-2.5-flash-lite",
+        "gemini-2.5-flash",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
 }
 
 impl GeminiClient {
@@ -111,7 +120,8 @@ impl GeminiClient {
             .unwrap_or(6000);
 
         let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs(30))
+            .timeout(Duration::from_secs(45))
+            .connect_timeout(Duration::from_secs(15))
             .build()?;
 
         Ok(Self {
@@ -180,6 +190,98 @@ impl GeminiClient {
                 "Gemini ListModels (status {status}) sem lista de modelos — chave inválida? Resposta: {payload}"
             ),
         }
+    }
+
+    /// Sonda de startup (a peça-chave da robustez): envia uma chamada REAL e
+    /// mínima a cada modelo candidato e FIXA o primeiro que responder 200.
+    /// Como "estar no ListModels" não garante generateContent nesta chave
+    /// (alguns retornam 404), só assim descobrimos com certeza um modelo que
+    /// funciona — eliminando 404 durante a operação.
+    ///
+    /// Retorna Ok(modelo) ou Err se nenhum for utilizável (chave sem acesso a
+    /// generateContent, por ex.).
+    pub async fn calibrate(&self) -> Result<String> {
+        // Probe com a MESMA generationConfig das chamadas reais (JSON estruturado
+        // + response_schema): assim um modelo que não suporta saída estruturada
+        // falha aqui e é descartado, em vez de quebrar durante a operação.
+        let probe_body = json!({
+            "system_instruction": { "parts": [{ "text": SYSTEM_PROMPT }] },
+            "contents": [{
+                "role": "user",
+                "parts": [{ "text": "Teste de disponibilidade. FONTE: teste; EVENTO/MANCHETE: ping; ATUAL: N/A; PROJEÇÃO: N/A; ANTERIOR: N/A. Responda com o JSON exigido." }]
+            }],
+            "generationConfig": {
+                "temperature": 0,
+                "response_mime_type": "application/json",
+                "response_schema": response_schema()
+            }
+        });
+
+        let mut fallback_429: Option<usize> = None;
+        let mut last_err = anyhow!("nenhum modelo candidato testado");
+
+        for (idx, model) in self.models.iter().enumerate() {
+            let url = format!(
+                "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+            );
+            self.throttle().await;
+            match self.probe(&url, &probe_body).await {
+                Ok(()) => {
+                    *self.model_idx.lock().expect("model_idx mutex") = idx;
+                    log::info!("Gemini: modelo selecionado para esta sessão -> '{model}'");
+                    return Ok(model.clone());
+                }
+                Err(CallError::NotFound) => {
+                    log::info!("Gemini: '{model}' sem generateContent p/ esta chave (404), pulando");
+                }
+                Err(CallError::RateLimited) => {
+                    log::warn!("Gemini: '{model}' respondeu 429 no probe (existe, mas limitado agora)");
+                    fallback_429.get_or_insert(idx);
+                }
+                Err(CallError::Transient(e)) => {
+                    log::warn!("Gemini: probe de '{model}' falhou: {e:#}");
+                    last_err = e;
+                }
+            }
+        }
+
+        // Ninguém respondeu 200, mas se algum deu 429 ele EXISTE — travamos
+        // nele e deixamos o throttle/backoff resolverem em operação.
+        if let Some(idx) = fallback_429 {
+            *self.model_idx.lock().expect("model_idx mutex") = idx;
+            let model = self.models[idx].clone();
+            log::warn!(
+                "Gemini: nenhum modelo respondeu 200 agora; usando '{model}' (limitado por cota)"
+            );
+            return Ok(model);
+        }
+        Err(last_err)
+    }
+
+    /// Igual ao call_once, mas só valida o STATUS HTTP (não desserializa o
+    /// corpo) — a resposta do probe não é uma análise no schema.
+    async fn probe(&self, url: &str, body: &Value) -> Result<(), CallError> {
+        let resp = self
+            .http
+            .post(url)
+            .header("x-goog-api-key", &self.api_key)
+            .json(body)
+            .send()
+            .await
+            .map_err(|e| CallError::Transient(e.into()))?;
+
+        let status = resp.status();
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Err(CallError::NotFound);
+        }
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            return Err(CallError::RateLimited);
+        }
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(CallError::Transient(anyhow!("HTTP {status}: {text}")));
+        }
+        Ok(())
     }
 
     /// Rate limit: garante o intervalo mínimo entre chamadas ao Gemini,
