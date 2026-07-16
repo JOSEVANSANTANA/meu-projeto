@@ -10,6 +10,7 @@ export default function App() {
   const { events, status, lastError } = useNewsStream();
 
   const critical = events.filter((e) => e.impact_level === "CRITICAL").length;
+  const medium = events.filter((e) => e.impact_level === "MEDIUM").length;
   const bullish = events.filter((e) => e.sentiment === "BULLISH").length;
   const bearish = events.filter((e) => e.sentiment === "BEARISH").length;
 
@@ -21,6 +22,9 @@ export default function App() {
       <div className="flex gap-6 border-b border-terminal-border px-4 py-1.5 text-xs">
         <span>
           CRITICAL <b className="text-terminal-red">{critical}</b>
+        </span>
+        <span>
+          MEDIUM <b className="text-terminal-amber">{medium}</b>
         </span>
         <span>
           BULLISH <b className="text-terminal-green">{bullish}</b>
@@ -47,7 +51,7 @@ export default function App() {
             <p className="mt-2 text-xs">
               O motor Rust está varrendo o calendário econômico e os feeds.
               <br />
-              Apenas eventos de alto impacto (3★, CPI, Payroll, FOMC) aparecem aqui.
+              Eventos de médio e alto impacto (2★/3★, CPI, Payroll, FOMC) aparecem aqui.
             </p>
           </div>
         ) : (

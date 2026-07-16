@@ -7,8 +7,8 @@ const CALENDAR_URL: &str = "https://www.investing.com/economic-calendar/";
 
 /// Conector do calendário econômico do Investing.com.
 ///
-/// FOCO: apenas eventos de ALTO IMPACTO (3 estrelas / "High Volatility
-/// Expected") dos EUA — CPI, Payroll, FOMC etc. Eventos de 1-2 estrelas
+/// FOCO: eventos de MÉDIO e ALTO impacto (2★ e 3★) dos EUA — CPI,
+/// Payroll, FOMC, PPI, Retail Sales etc. Eventos de 1★ (baixo impacto)
 /// são ignorados na origem para não desperdiçar chamadas ao Gemini.
 ///
 /// NOTA DE MANUTENÇÃO: seletores CSS de sites de terceiros mudam sem
@@ -45,9 +45,11 @@ fn parse_calendar(html: &str) -> Result<Vec<RawNewsItem>> {
     let mut items = Vec::new();
 
     for row in doc.select(&row_sel) {
-        // 3 ícones de "touro cheio" = evento 3 estrelas (alto impacto)
+        // Ícones de "touro cheio" = nível de impacto do Investing.com:
+        // 3★ = alto, 2★ = médio, 1★ = baixo. Aceitamos 2★ e 3★
+        // (médio e alto impacto); 1★ é ignorado na origem.
         let stars = row.select(&stars_sel).count();
-        if stars < 3 {
+        if stars < 2 {
             continue;
         }
 
@@ -90,11 +92,14 @@ fn parse_calendar(html: &str) -> Result<Vec<RawNewsItem>> {
             actual,
             forecast: text_of(&forecast_sel).filter(|v| !v.is_empty()),
             previous: text_of(&previous_sel).filter(|v| !v.is_empty()),
-            impact_hint: "3-star".to_string(),
+            impact_hint: format!("{}-star", stars),
             timestamp_utc: datetime,
         });
     }
 
-    log::info!("Investing.com: {} evento(s) 3-estrelas com dado divulgado", items.len());
+    log::info!(
+        "Investing.com: {} evento(s) 2★/3★ (médio+alto) com dado divulgado",
+        items.len()
+    );
     Ok(items)
 }
