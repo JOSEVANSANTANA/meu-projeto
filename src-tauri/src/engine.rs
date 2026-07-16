@@ -41,13 +41,30 @@ pub async fn run_loop(app: AppHandle) {
 
         // Pilar 1 — conectores rodam em sequência, cada um com seu
         // polite_delay() interno (2–5s aleatórios por requisição).
-        match scrapers::investing::fetch_high_impact_events().await {
+
+        // Fonte principal: feeds RSS (robusta, sem bloqueio, sem chave).
+        match scrapers::rss::fetch_all().await {
             Ok(mut v) => batch.append(&mut v),
-            Err(e) => log::warn!("Investing.com falhou neste ciclo: {e:#}"),
+            Err(e) => log::warn!("Feeds RSS falharam neste ciclo: {e:#}"),
         }
+
+        // Manchetes rápidas opcionais (Truth Social via RSS, se configurado).
         match scrapers::financial_juice::fetch_headlines().await {
             Ok(mut v) => batch.append(&mut v),
-            Err(e) => log::warn!("Feeds de manchetes falharam neste ciclo: {e:#}"),
+            Err(e) => log::warn!("Feeds de manchetes rápidas falharam neste ciclo: {e:#}"),
+        }
+
+        // Investing.com fica atrás do Cloudflare e retorna 403 a scrapers
+        // HTTP simples. Por isso vem DESLIGADO por padrão; ative apenas se
+        // tiver um contorno (proxy/navegador) definindo ENABLE_INVESTING=1.
+        let enable_investing = std::env::var("ENABLE_INVESTING")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        if enable_investing {
+            match scrapers::investing::fetch_high_impact_events().await {
+                Ok(mut v) => batch.append(&mut v),
+                Err(e) => log::warn!("Investing.com falhou neste ciclo: {e:#}"),
+            }
         }
 
         for item in batch {

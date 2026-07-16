@@ -1,5 +1,6 @@
 pub mod financial_juice;
 pub mod investing;
+pub mod rss;
 
 use rand::Rng;
 use std::time::Duration;
@@ -49,11 +50,22 @@ pub fn browser_client() -> reqwest::Result<reqwest::Client> {
 /// Calendário: eventos 3 estrelas. Manchetes: keywords macro críticas.
 pub fn is_high_impact_headline(headline: &str) -> bool {
     const KEYWORDS: &[&str] = &[
-        "cpi", "core cpi", "inflation", "payroll", "nonfarm", "nfp",
+        // Inflação
+        "cpi", "core cpi", "consumer price", "inflation", "ppi",
+        "producer price", "pce",
+        // Emprego (o release oficial do NFP se chama "Employment Situation")
+        "payroll", "nonfarm", "nfp", "employment situation", "unemployment",
+        "jobless", "initial claims",
+        // Fed / juros
         "fomc", "fed ", "federal reserve", "powell", "rate decision",
-        "interest rate", "ppi", "gdp", "unemployment", "jobless",
-        "retail sales", "pce", "tariff", "treasury", "yield",
-        "trump", "white house", "geopolit", "opec", "war",
+        "interest rate", "rate cut", "rate hike", "fed funds", "dot plot",
+        // Atividade / macro
+        "gdp", "gross domestic product", "retail sales", "ism", "pmi",
+        "consumer confidence", "recession",
+        // Mercado / risco
+        "treasury", "yield", "tariff", "sanction", "opec", "crude",
+        // Político / geopolítico
+        "trump", "white house", "geopolit", "war",
     ];
     let h = headline.to_lowercase();
     KEYWORDS.iter().any(|k| h.contains(k))

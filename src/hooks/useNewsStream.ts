@@ -41,12 +41,15 @@ export function useNewsStream() {
     const unlisteners: Array<() => void> = [];
 
     (async () => {
-      // 1. Histórico local
+      // 1. Histórico local. Se o command responde, o backend Rust está
+      //    vivo -> marcamos ONLINE (o evento "engine-status" emitido no
+      //    startup pode ter ocorrido antes deste listener existir).
       try {
         const history = await invoke<NewsEvent[]>("get_recent_events", { limit: 100 });
         if (!disposed) {
           history.forEach((e) => seen.current.add(e.dedup_key));
           setEvents(history);
+          setStatus("ONLINE");
         }
       } catch (e) {
         console.error("Falha ao carregar histórico:", e);
