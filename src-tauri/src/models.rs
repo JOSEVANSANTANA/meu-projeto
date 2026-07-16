@@ -15,10 +15,15 @@ pub struct RawNewsItem {
 }
 
 impl RawNewsItem {
-    /// Hash estável para deduplicação (mesma manchete/dado não é analisado 2x).
-    pub fn dedup_key(&self) -> String {
+    /// Hash estável para deduplicação, ESCOPADO PELO ATIVO: a mesma manchete
+    /// sob ativos diferentes (ES vs NQ) gera chaves diferentes — assim, ao
+    /// trocar o ativo prioritário, as notícias são re-analisadas sob a ótica
+    /// do novo ativo (que reage de forma distinta à mesma notícia).
+    pub fn dedup_key_for(&self, asset: &str) -> String {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
+        hasher.update(asset.as_bytes());
+        hasher.update([0u8]);
         hasher.update(self.source.as_bytes());
         hasher.update(self.headline.as_bytes());
         hasher.update(self.actual.as_deref().unwrap_or("").as_bytes());
@@ -65,6 +70,8 @@ pub struct NewsEvent {
     pub id: i64,
     pub dedup_key: String,
     pub received_at_utc: String,
+    /// Ativo para o qual esta análise foi feita (ES, NQ, etc.).
+    pub asset: String,
     #[serde(flatten)]
     pub analysis: GeminiAnalysis,
 }

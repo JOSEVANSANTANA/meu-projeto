@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { EngineStatus, NewsEvent } from "../types";
+import { requestAttention } from "../lib/nativeAlerts";
 
 const MAX_FEED_SIZE = 200;
 
@@ -62,9 +63,11 @@ export function useNewsStream() {
           seen.current.add(payload.dedup_key);
           setEvents((prev) => [payload, ...prev].slice(0, MAX_FEED_SIZE));
 
-          // 3. Alerta sonoro (a notificação nativa é disparada pelo Rust)
+          // 3. Alerta sonoro + flash na barra de tarefas (a notificação nativa
+          //    é disparada pelo Rust; clicar nela traz o app para frente).
           if (payload.impact_level === "CRITICAL" || payload.impact_level === "HIGH") {
             playAlertSound(payload.impact_level === "CRITICAL");
+            void requestAttention();
           }
         }),
         await listen<string>("engine-status", ({ payload }) => {

@@ -100,6 +100,48 @@ export interface PriceProjection {
   down: number; // cenário de baixa
 }
 
+/** Participação de sentimento (compra/venda/neutro) ponderada por impacto. */
+export interface SentimentShare {
+  buy: number; // % BULLISH
+  sell: number; // % BEARISH
+  neutral: number; // % NEUTRAL
+  count: number;
+}
+
+export function sentimentShare(events: NewsEvent[]): SentimentShare {
+  let buy = 0;
+  let sell = 0;
+  let neu = 0;
+  for (const e of events) {
+    const w = IMPACT_WEIGHT[e.impact_level] ?? 0.5;
+    if (e.sentiment === "BULLISH") buy += w;
+    else if (e.sentiment === "BEARISH") sell += w;
+    else neu += w;
+  }
+  const total = buy + sell + neu;
+  if (total === 0) return { buy: 0, sell: 0, neutral: 0, count: 0 };
+  const pct = (v: number) => Math.round((v / total) * 100);
+  return {
+    buy: pct(buy),
+    sell: pct(sell),
+    neutral: pct(neu),
+    count: events.length,
+  };
+}
+
+/** Filtra eventos recebidos nos últimos `minutes` minutos. */
+export function withinLastMinutes(
+  events: NewsEvent[],
+  minutes: number,
+  now: number = Date.now(),
+): NewsEvent[] {
+  const cutoff = now - minutes * 60_000;
+  return events.filter((e) => {
+    const t = new Date(e.received_at_utc).getTime();
+    return !isNaN(t) && t >= cutoff;
+  });
+}
+
 export function projectPrice(price: number, agg: Aggregate): PriceProjection {
   const span = Math.max(Math.abs(agg.netPts), 5); // banda mínima de 5 pts
   return {

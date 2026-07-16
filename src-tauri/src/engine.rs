@@ -101,7 +101,10 @@ pub async fn run_loop(app: AppHandle, gemini: Arc<GeminiClient>) {
                 break; // o restante é reprocessado no próximo ciclo (via dedup)
             }
 
-            let key = item.dedup_key();
+            // Chave de dedup ESCOPADA PELO ATIVO ativo: trocar de ativo faz as
+            // notícias serem re-analisadas sob a ótica do novo ativo.
+            let asset = gemini.asset();
+            let key = item.dedup_key_for(&asset);
 
             // Dedup ANTES do Gemini: cada chamada de LLM custa dinheiro/latência.
             let is_new = {
@@ -124,7 +127,7 @@ pub async fn run_loop(app: AppHandle, gemini: Arc<GeminiClient>) {
             }
 
             analyzed_this_cycle += 1;
-            if analyze_and_store(&app, &gemini, &item, &key).await {
+            if analyze_and_store(&app, &gemini, &item, &key, &asset).await {
                 fail_counts.remove(&key);
                 consecutive_failures = 0;
             } else {
@@ -165,6 +168,7 @@ async fn analyze_and_store(
     gemini: &GeminiClient,
     item: &RawNewsItem,
     key: &str,
+    asset: &str,
 ) -> bool {
     // Pilar 2 — análise estruturada no Gemini
     let analysis = match gemini.analyze(item).await {
@@ -179,7 +183,7 @@ async fn analyze_and_store(
     let event = {
         let state = app.state::<AppState>();
         let db = state.db.lock().expect("db mutex envenenado");
-        match db.insert(key, &analysis) {
+        match db.insert(key, asset, &analysis) {
             Ok(ev) => ev,
             Err(e) => {
                 log::error!("Falha ao persistir evento: {e:#}");
@@ -189,10 +193,11 @@ async fn analyze_and_store(
     };
 
     log::info!(
-        "[{}] {} | {} | ES {}",
+        "[{}] {} | {} | {} {}",
         event.analysis.impact_level,
         event.analysis.event,
         event.analysis.sentiment,
+        asset,
         event.analysis.projected_target_pts
     );
     let _ = app.emit("news-event", &event);

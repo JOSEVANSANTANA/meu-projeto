@@ -20,6 +20,14 @@ function fmtTime(iso: string): string {
     : d.toLocaleTimeString("pt-BR", { hour12: false });
 }
 
+/** Extrai um ticker curto do ativo: "S&P 500 Futuro (ES)" -> "ES". */
+function tickerOf(asset: string): string {
+  if (!asset) return "DIR";
+  const m = asset.match(/\(([^)]+)\)/);
+  if (m) return m[1].toUpperCase();
+  return asset.split(/\s+/)[0].slice(0, 6).toUpperCase();
+}
+
 export function NewsCard({ ev }: { ev: NewsEvent }) {
   const sentiment = SENTIMENT_STYLES[ev.sentiment] ?? SENTIMENT_STYLES.NEUTRAL;
   const badge = IMPACT_BADGE[ev.impact_level] ?? IMPACT_BADGE.LOW;
@@ -60,9 +68,9 @@ export function NewsCard({ ev }: { ev: NewsEvent }) {
         </div>
       )}
 
-      {/* Linha 4: probabilidade direcional ES + alvo projetado */}
+      {/* Linha 4: probabilidade direcional do ativo + alvo projetado */}
       <div className="mt-2 flex items-center gap-3 text-xs">
-        <span className="text-terminal-dim">ES</span>
+        <span className="text-terminal-dim">{tickerOf(ev.asset)}</span>
         <div className="flex h-2 flex-1 overflow-hidden rounded-sm bg-terminal-border">
           <div className="bg-terminal-green" style={{ width: `${up}%` }} />
           <div className="bg-terminal-red" style={{ width: `${down}%` }} />

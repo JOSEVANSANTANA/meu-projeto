@@ -3,6 +3,7 @@ export interface NewsEvent {
   id: number;
   dedup_key: string;
   received_at_utc: string;
+  asset: string;
   source: string;
   event: string;
   impact_level: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";

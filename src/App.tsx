@@ -5,14 +5,15 @@ import { StatusBar } from "./components/StatusBar";
 import { ControlBar } from "./components/ControlBar";
 import { SeverityFilter } from "./components/SeverityFilter";
 import { MomentumChart } from "./components/MomentumChart";
+import { SentimentPies } from "./components/SentimentPies";
 import { useNewsStream } from "./hooks/useNewsStream";
+import { registerNotificationClickFocus } from "./lib/nativeAlerts";
 import type { RuntimeStatus, SeverityFilter as Filter } from "./types";
 
 /**
- * Dashboard principal — estilo terminal Bloomberg:
- * fundo escuro, fonte monoespaçada, feed ao vivo colorido por sentimento,
- * compilado do momento (gráfico), filtro por severidade e controles de
- * ativo/preço/API key no topo.
+ * Dashboard principal — estilo terminal Bloomberg. Tudo (feed, gráfico,
+ * pizzas, contadores) é escopado pelo ATIVO ATIVO: trocar o ativo mostra
+ * apenas as análises daquele papel, que são recalculadas sob a ótica dele.
  */
 export default function App() {
   const { events, status, lastError } = useNewsStream();
@@ -28,30 +29,44 @@ export default function App() {
 
   useEffect(() => {
     refreshRuntime();
+    // Clicar na notificação nativa traz o app para frente.
+    let unlisten: (() => void) | undefined;
+    registerNotificationClickFocus().then((fn) => (unlisten = fn));
+    return () => unlisten?.();
   }, []);
+
+  const asset = runtime?.asset ?? "S&P 500 Futuro (ES)";
+
+  // Escopo do dashboard: só os eventos do ativo ativo. Enquanto o runtime não
+  // carregou, mostramos tudo para não piscar vazio.
+  const assetEvents = useMemo(
+    () => (runtime ? events.filter((e) => e.asset === asset) : events),
+    [events, asset, runtime],
+  );
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {
-      ALL: events.length,
+      ALL: assetEvents.length,
       CRITICAL: 0,
       HIGH: 0,
       MEDIUM: 0,
       LOW: 0,
     };
-    for (const e of events) c[e.impact_level] = (c[e.impact_level] ?? 0) + 1;
+    for (const e of assetEvents) c[e.impact_level] = (c[e.impact_level] ?? 0) + 1;
     return c;
-  }, [events]);
+  }, [assetEvents]);
 
   const visible = useMemo(
-    () => (filter === "ALL" ? events : events.filter((e) => e.impact_level === filter)),
-    [events, filter],
+    () =>
+      filter === "ALL"
+        ? assetEvents
+        : assetEvents.filter((e) => e.impact_level === filter),
+    [assetEvents, filter],
   );
-
-  const asset = runtime?.asset ?? "S&P 500 (ES)";
 
   return (
     <div className="flex h-screen flex-col bg-terminal-bg font-mono text-gray-200">
-      <StatusBar status={status} eventCount={events.length} />
+      <StatusBar status={status} eventCount={assetEvents.length} />
 
       <ControlBar
         status={runtime}
@@ -60,8 +75,11 @@ export default function App() {
         onStatusRefresh={refreshRuntime}
       />
 
-      {/* Compilado do momento (gráfico) */}
-      <MomentumChart events={events} price={price} asset={asset} />
+      {/* Compilado do momento (viés + momentum + níveis projetados) */}
+      <MomentumChart events={assetEvents} price={price} asset={asset} />
+
+      {/* Pizzas de sentimento: geral / 30min / 5min */}
+      <SentimentPies events={assetEvents} />
 
       {/* Filtro por severidade + fontes */}
       <div className="flex flex-wrap items-center gap-3 border-b border-terminal-border px-4 py-1.5">
@@ -77,18 +95,18 @@ export default function App() {
         </div>
       )}
 
-      {/* Feed ao vivo (filtrado) */}
+      {/* Feed ao vivo (filtrado por ativo + severidade) */}
       <main className="flex-1 space-y-2 overflow-y-auto p-3">
         {visible.length === 0 ? (
           <div className="mt-24 text-center text-terminal-dim">
             <p className="text-lg">
-              {events.length === 0
-                ? "AGUARDANDO FLUXO DE NOTÍCIAS…"
+              {assetEvents.length === 0
+                ? `AGUARDANDO ANÁLISES PARA ${asset}…`
                 : `NENHUM EVENTO "${filter}" NO MOMENTO`}
             </p>
             <p className="mt-2 text-xs">
-              {events.length === 0
-                ? "O motor Rust está varrendo os feeds. Eventos de médio e alto impacto aparecem aqui."
+              {assetEvents.length === 0
+                ? "Ao trocar de ativo, as notícias são re-analisadas sob a ótica dele — os cards aparecem em alguns ciclos."
                 : "Ajuste o filtro de severidade acima."}
             </p>
           </div>
