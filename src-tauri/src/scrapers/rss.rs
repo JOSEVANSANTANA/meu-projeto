@@ -19,6 +19,12 @@ use anyhow::Result;
 /// Você pode acrescentar/trocar feeds via variável RSS_FEEDS no .env
 /// (formato: "Nome|url,Nome|url").
 fn default_feeds() -> Vec<(String, String)> {
+    // Todos gratuitos, legíveis por máquina e de veículos confiáveis. Cada
+    // manchete ainda passa pelo filtro de impacto (keywords macro + anti-ruído)
+    // antes de ir ao Gemini, então feeds mais "largos" não poluem o painel.
+    let cnbc = |id: &str| {
+        format!("https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id={id}")
+    };
     vec![
         (
             "Federal Reserve".into(),
@@ -29,9 +35,16 @@ fn default_feeds() -> Vec<(String, String)> {
             "https://feeds.marketwatch.com/marketwatch/realtimeheadlines/".into(),
         ),
         (
-            "CNBC Economy".into(),
-            "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258"
-                .into(),
+            "MarketWatch Top".into(),
+            "https://feeds.marketwatch.com/marketwatch/topstories/".into(),
+        ),
+        ("CNBC Economy".into(), cnbc("20910258")),
+        ("CNBC Finance".into(), cnbc("10000664")),
+        ("CNBC Markets".into(), cnbc("15839069")),
+        ("CNBC Top News".into(), cnbc("100003114")),
+        (
+            "Yahoo Finance".into(),
+            "https://finance.yahoo.com/news/rssindex".into(),
         ),
     ]
 }

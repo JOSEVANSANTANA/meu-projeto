@@ -4,20 +4,34 @@ use serde_json::{json, Value};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-/// System prompt RÍGIDO: força o Gemini a se comportar como analista
-/// quantitativo e a responder exclusivamente com o JSON do schema exigido.
-const SYSTEM_PROMPT: &str = r#"Você é um motor de análise quantitativa de notícias macroeconômicas especializado no S&P 500 Futuro (ticker ES).
+/// System prompt RÍGIDO + TRAVA ANTI-ALUCINAÇÃO. É parametrizado pelo ativo
+/// prioritário escolhido pelo usuário (ES/NQ/etc.), mas o schema de saída é
+/// sempre o mesmo. A regra central: analisar SÓ o que está no texto — nunca
+/// inventar números, consenso ou eventos.
+fn system_prompt(asset: &str) -> String {
+    format!(
+        r#"Você é um motor de análise quantitativa de notícias macroeconômicas focado no ATIVO PRIORITÁRIO desta sessão: {asset}.
 
 REGRAS ABSOLUTAS — VIOLAÇÃO NÃO É PERMITIDA:
 1. Responda ESTRITAMENTE com um único objeto JSON válido. Sem markdown, sem cercas de código, sem texto antes ou depois.
 2. O JSON deve conter EXATAMENTE estes campos: source, event, impact_level, actual, forecast, previous, sentiment, sp500_direction_probability (objeto com "up" e "down" inteiros somando 100), projected_target_pts, rationale, alert_type.
-3. impact_level: um de "CRITICAL", "HIGH", "MEDIUM", "LOW". Dados como CPI, Core CPI, Nonfarm Payrolls, decisão de juros do FOMC e falas do presidente do Fed com surpresa vs. consenso são "CRITICAL". Surpresas moderadas em PPI, GDP, Retail Sales, Jobless Claims são "HIGH".
-4. sentiment: um de "BULLISH", "BEARISH", "NEUTRAL" — sempre da perspectiva do S&P 500 Futuro (ES), não da economia. Ex.: CPI acima do esperado = pressão de juros = tipicamente BEARISH para o ES.
-5. projected_target_pts: estimativa de movimento no ES no formato "+15 pts", "-25 pts" ou "0 pts", calibrada pela magnitude da surpresa (actual vs. forecast) e histórico do evento.
-6. rationale: máximo de 2 frases, direto, em português, citando a surpresa numérica quando existir.
-7. alert_type: um de "HIGH_VOLATILITY", "TREND_CONFIRMATION", "REVERSAL_RISK", "INFO".
-8. Se algum dado de entrada estiver ausente, use "N/A" no campo correspondente — nunca invente números.
-9. Nunca inclua campos extras, comentários ou explicações fora do JSON."#;
+3. O campo sp500_direction_probability representa a probabilidade direcional do ATIVO PRIORITÁRIO ({asset}) — mesmo que o nome do campo mencione sp500. sentiment e projected_target_pts também se referem a {asset}.
+4. impact_level: um de "CRITICAL", "HIGH", "MEDIUM", "LOW". CPI, Core CPI, Nonfarm Payrolls, decisão de juros do FOMC e falas do presidente do Fed com surpresa vs. consenso são "CRITICAL". Surpresas moderadas em PPI, GDP, Retail Sales, Jobless Claims são "HIGH".
+5. sentiment: um de "BULLISH", "BEARISH", "NEUTRAL" — da perspectiva de {asset}, não da economia. Ex.: CPI acima do esperado = pressão de juros = tipicamente BEARISH para índices acionários.
+6. projected_target_pts: estimativa de movimento em PONTOS de {asset} no formato "+15 pts", "-25 pts" ou "0 pts", calibrada pela magnitude da surpresa (actual vs. forecast).
+7. rationale: máximo de 2 frases, direto, em português.
+8. alert_type: um de "HIGH_VOLATILITY", "TREND_CONFIRMATION", "REVERSAL_RISK", "INFO".
+
+TRAVA ANTI-ALUCINAÇÃO (CRÍTICO — a precisão vale mais que a ousadia):
+A. Baseie-se EXCLUSIVAMENTE no texto fornecido (manchete + actual/forecast/previous). É PROIBIDO inventar números, percentuais, valores de consenso, datas ou eventos que não estejam explicitamente na entrada.
+B. Se actual/forecast/previous vierem "N/A", NÃO fabrique surpresa numérica; avalie apenas o teor qualitativo da manchete e reflita essa incerteza reduzindo a magnitude e a confiança.
+C. Se a manchete for ambígua, genérica, ou não claramente ligada a {asset} ou à macroeconomia dos EUA, retorne impact_level "LOW", sentiment "NEUTRAL", probabilidade 50/50 e projected_target_pts "0 pts", explicando a incerteza no rationale.
+D. NÃO afirme relação de causa que não possa ser inferida do próprio texto. Na dúvida, prefira "NEUTRAL" a especular.
+E. O rationale deve citar SOMENTE informação presente na entrada. É proibido citar números que não foram fornecidos.
+F. A probabilidade direcional deve ser proporcional à força REAL da evidência: sem dado numérico de surpresa, mantenha-se próximo de 50/50 (ex.: no máximo 60/40), reservando extremos (80/20+) para surpresas numéricas claras.
+G. Nunca inclua campos extras, comentários ou explicações fora do JSON."#
+    )
+}
 
 /// Schema declarativo enviado em generationConfig.responseSchema —
 /// segunda camada de garantia (além do prompt) de saída estruturada.
@@ -55,33 +69,32 @@ fn response_schema() -> Value {
     })
 }
 
+/// Cliente Gemini compartilhado (Arc no AppState). Guarda, com mutabilidade
+/// interior, o pool de API keys (com rotação quando uma esgota) e o ativo
+/// prioritário — ambos ajustáveis em runtime pela UI.
 pub struct GeminiClient {
     http: reqwest::Client,
-    api_key: String,
-    /// Lista de modelos a tentar, em ordem de preferência. O primeiro que
-    /// responder (não-404) é memorizado em `model_idx` e usado nas próximas.
     models: Vec<String>,
     model_idx: Mutex<usize>,
-    /// Controle de rate limit: instante da última chamada + intervalo mínimo.
     last_call: Mutex<Instant>,
     min_interval: Duration,
+    keys: Mutex<Vec<String>>,
+    active_key: Mutex<usize>,
+    asset: Mutex<String>,
 }
 
-/// Resultado tipado de uma chamada, para o fallback decidir o que fazer:
-/// 404 -> troca de modelo; 429 -> espera e re-tenta; demais -> transitório.
 enum CallError {
     NotFound,
     RateLimited,
     Transient(anyhow::Error),
 }
 
-/// Modelos candidatos, em ordem de preferência (todos da família flash —
-/// baixa latência/custo). O startup sonda cada um e TRAVA no primeiro que
-/// responder 200 para esta chave, então a ordem só define a preferência.
+/// Modelos candidatos, em ordem de preferência (família flash). O startup
+/// sonda e trava no primeiro que responder 200 para a chave ativa.
 fn default_models() -> Vec<String> {
     [
-        "gemini-flash-latest",   // alias estável -> flash atual
-        "gemini-2.0-flash",      // comprovadamente presente nesta chave
+        "gemini-flash-latest",
+        "gemini-2.0-flash",
         "gemini-2.0-flash-001",
         "gemini-flash-lite-latest",
         "gemini-2.5-flash-lite",
@@ -94,11 +107,18 @@ fn default_models() -> Vec<String> {
 
 impl GeminiClient {
     pub fn from_env() -> Result<Self> {
-        let api_key = std::env::var("GEMINI_API_KEY")
+        // GEMINI_API_KEY aceita UMA ou VÁRIAS chaves separadas por vírgula.
+        let raw = std::env::var("GEMINI_API_KEY")
             .context("GEMINI_API_KEY não definida — configure o arquivo .env na raiz do projeto")?;
+        let keys: Vec<String> = raw
+            .split(',')
+            .map(|k| k.trim().to_string())
+            .filter(|k| !k.is_empty())
+            .collect();
+        if keys.is_empty() {
+            return Err(anyhow!("GEMINI_API_KEY vazia"));
+        }
 
-        // GEMINI_MODEL pode ser uma lista separada por vírgula. O que o
-        // usuário definir é tentado primeiro; os padrões entram como fallback.
         let mut models: Vec<String> = std::env::var("GEMINI_MODEL")
             .unwrap_or_default()
             .split(',')
@@ -119,6 +139,11 @@ impl GeminiClient {
             .and_then(|v| v.parse().ok())
             .unwrap_or(6000);
 
+        let asset = std::env::var("PRIORITY_ASSET")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "S&P 500 Futuro (ES)".to_string());
+
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(45))
             .connect_timeout(Duration::from_secs(15))
@@ -126,31 +151,76 @@ impl GeminiClient {
 
         Ok(Self {
             http,
-            api_key,
             models,
             model_idx: Mutex::new(0),
-            // Recuado no tempo p/ a 1ª chamada não esperar (checked_sub evita
-            // underflow se a máquina tiver sido ligada há pouco tempo).
             last_call: Mutex::new(
                 Instant::now()
                     .checked_sub(Duration::from_secs(3600))
                     .unwrap_or_else(Instant::now),
             ),
             min_interval: Duration::from_millis(min_interval_ms),
+            keys: Mutex::new(keys),
+            active_key: Mutex::new(0),
+            asset: Mutex::new(asset),
         })
     }
 
-    /// Diagnóstico de startup: lista os modelos que ESTA chave pode usar com
-    /// generateContent. Ajuda a descobrir o nome correto quando dá 404.
+    // ---- Configuração em runtime (usada pelos commands da UI) ----------------
+
+    /// Adiciona uma nova API key ao pool (para quando uma esgota a cota).
+    /// Retorna o total de chaves. Ignora duplicadas e vazias.
+    pub fn add_key(&self, key: &str) -> usize {
+        let key = key.trim().to_string();
+        let mut keys = self.keys.lock().expect("keys mutex");
+        if !key.is_empty() && !keys.contains(&key) {
+            keys.push(key);
+        }
+        keys.len()
+    }
+
+    pub fn keys_len(&self) -> usize {
+        self.keys.lock().expect("keys mutex").len()
+    }
+
+    pub fn active_key_index(&self) -> usize {
+        *self.active_key.lock().expect("active_key mutex")
+    }
+
+    fn current_key(&self) -> String {
+        let keys = self.keys.lock().expect("keys mutex");
+        let idx = *self.active_key.lock().expect("active_key mutex");
+        keys.get(idx).cloned().unwrap_or_default()
+    }
+
+    /// Avança para a próxima chave do pool (cíclico). Retorna true se de fato
+    /// trocou para uma chave diferente (i.e., há mais de uma).
+    pub fn rotate_key(&self) -> bool {
+        let len = self.keys.lock().expect("keys mutex").len();
+        if len <= 1 {
+            return false;
+        }
+        let mut idx = self.active_key.lock().expect("active_key mutex");
+        *idx = (*idx + 1) % len;
+        true
+    }
+
+    pub fn set_asset(&self, asset: &str) {
+        let a = asset.trim();
+        if !a.is_empty() {
+            *self.asset.lock().expect("asset mutex") = a.to_string();
+        }
+    }
+
+    pub fn asset(&self) -> String {
+        self.asset.lock().expect("asset mutex").clone()
+    }
+
+    // ---- Diagnóstico + calibração -------------------------------------------
+
     pub async fn log_available_models(&self) {
+        let api_key = self.current_key();
         let url = "https://generativelanguage.googleapis.com/v1beta/models";
-        let resp = match self
-            .http
-            .get(url)
-            .header("x-goog-api-key", &self.api_key)
-            .send()
-            .await
-        {
+        let resp = match self.http.get(url).header("x-goog-api-key", &api_key).send().await {
             Ok(r) => r,
             Err(e) => {
                 log::warn!("Gemini ListModels: request falhou: {e:#}");
@@ -176,9 +246,7 @@ impl GeminiClient {
                             .unwrap_or(false)
                     })
                     .filter_map(|m| {
-                        m["name"]
-                            .as_str()
-                            .map(|s| s.trim_start_matches("models/").to_string())
+                        m["name"].as_str().map(|s| s.trim_start_matches("models/").to_string())
                     })
                     .collect();
                 log::info!(
@@ -192,20 +260,12 @@ impl GeminiClient {
         }
     }
 
-    /// Sonda de startup (a peça-chave da robustez): envia uma chamada REAL e
-    /// mínima a cada modelo candidato e FIXA o primeiro que responder 200.
-    /// Como "estar no ListModels" não garante generateContent nesta chave
-    /// (alguns retornam 404), só assim descobrimos com certeza um modelo que
-    /// funciona — eliminando 404 durante a operação.
-    ///
-    /// Retorna Ok(modelo) ou Err se nenhum for utilizável (chave sem acesso a
-    /// generateContent, por ex.).
+    /// Sonda cada modelo candidato com uma chamada REAL (mesma generationConfig
+    /// de produção) usando a chave ativa e FIXA o primeiro que responder 200.
     pub async fn calibrate(&self) -> Result<String> {
-        // Probe com a MESMA generationConfig das chamadas reais (JSON estruturado
-        // + response_schema): assim um modelo que não suporta saída estruturada
-        // falha aqui e é descartado, em vez de quebrar durante a operação.
+        let api_key = self.current_key();
         let probe_body = json!({
-            "system_instruction": { "parts": [{ "text": SYSTEM_PROMPT }] },
+            "system_instruction": { "parts": [{ "text": system_prompt(&self.asset()) }] },
             "contents": [{
                 "role": "user",
                 "parts": [{ "text": "Teste de disponibilidade. FONTE: teste; EVENTO/MANCHETE: ping; ATUAL: N/A; PROJEÇÃO: N/A; ANTERIOR: N/A. Responda com o JSON exigido." }]
@@ -225,7 +285,7 @@ impl GeminiClient {
                 "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
             );
             self.throttle().await;
-            match self.probe(&url, &probe_body).await {
+            match self.probe(&url, &probe_body, &api_key).await {
                 Ok(()) => {
                     *self.model_idx.lock().expect("model_idx mutex") = idx;
                     log::info!("Gemini: modelo selecionado para esta sessão -> '{model}'");
@@ -245,8 +305,6 @@ impl GeminiClient {
             }
         }
 
-        // Ninguém respondeu 200, mas se algum deu 429 ele EXISTE — travamos
-        // nele e deixamos o throttle/backoff resolverem em operação.
         if let Some(idx) = fallback_429 {
             *self.model_idx.lock().expect("model_idx mutex") = idx;
             let model = self.models[idx].clone();
@@ -258,13 +316,11 @@ impl GeminiClient {
         Err(last_err)
     }
 
-    /// Igual ao call_once, mas só valida o STATUS HTTP (não desserializa o
-    /// corpo) — a resposta do probe não é uma análise no schema.
-    async fn probe(&self, url: &str, body: &Value) -> Result<(), CallError> {
+    async fn probe(&self, url: &str, body: &Value, api_key: &str) -> Result<(), CallError> {
         let resp = self
             .http
             .post(url)
-            .header("x-goog-api-key", &self.api_key)
+            .header("x-goog-api-key", api_key)
             .json(body)
             .send()
             .await
@@ -284,8 +340,6 @@ impl GeminiClient {
         Ok(())
     }
 
-    /// Rate limit: garante o intervalo mínimo entre chamadas ao Gemini,
-    /// reservando o próximo "slot" para chamadas sequenciais não colidirem.
     async fn throttle(&self) {
         let wait = {
             let mut last = self.last_call.lock().expect("last_call mutex");
@@ -300,12 +354,17 @@ impl GeminiClient {
         }
     }
 
-    /// Envia o contexto da notícia (Atual vs. Projeção vs. Anterior) e
-    /// retorna a análise estruturada. Faz até 2 re-tentativas se a resposta
-    /// não desserializar no schema exigido.
+    // ---- Análise ------------------------------------------------------------
+
+    /// Envia o contexto da notícia e retorna a análise estruturada, com
+    /// fallback de modelos e respeito ao rate limit. Usa a chave ativa e o
+    /// ativo prioritário correntes.
     pub async fn analyze(&self, item: &RawNewsItem) -> Result<GeminiAnalysis> {
+        let api_key = self.current_key();
+        let asset = self.asset();
+
         let user_context = format!(
-            "FONTE: {}\nEVENTO/MANCHETE: {}\nDADO ATUAL (actual): {}\nPROJEÇÃO (forecast): {}\nANTERIOR (previous): {}\nHORÁRIO (UTC): {}\n\nAnalise o impacto imediato no S&P 500 Futuro (ES) e responda com o JSON exigido.",
+            "ATIVO PRIORITÁRIO: {asset}\nFONTE: {}\nEVENTO/MANCHETE: {}\nDADO ATUAL (actual): {}\nPROJEÇÃO (forecast): {}\nANTERIOR (previous): {}\nHORÁRIO (UTC): {}\n\nAnalise o impacto imediato em {asset} e responda com o JSON exigido, seguindo a trava anti-alucinação.",
             item.source,
             item.headline,
             item.actual.as_deref().unwrap_or("N/A"),
@@ -315,24 +374,15 @@ impl GeminiClient {
         );
 
         let body = json!({
-            "system_instruction": {
-                "parts": [{ "text": SYSTEM_PROMPT }]
-            },
-            "contents": [{
-                "role": "user",
-                "parts": [{ "text": user_context }]
-            }],
+            "system_instruction": { "parts": [{ "text": system_prompt(&asset) }] },
+            "contents": [{ "role": "user", "parts": [{ "text": user_context }] }],
             "generationConfig": {
-                "temperature": 0.1,
+                "temperature": 0.0,
                 "response_mime_type": "application/json",
                 "response_schema": response_schema()
             }
         });
 
-        // Fallback em cascata: percorre a lista de modelos começando pelo
-        // último que funcionou. 404 = modelo indisponível -> próximo. 429 =
-        // rate limit -> espera e re-tenta o MESMO modelo. Ao ter sucesso,
-        // memoriza o índice para as próximas chamadas irem direto.
         let n = self.models.len();
         let start = *self.model_idx.lock().expect("model_idx mutex");
         let mut last_err = anyhow!("nenhuma tentativa executada");
@@ -347,7 +397,7 @@ impl GeminiClient {
             let mut rate_retries = 0u8;
             loop {
                 self.throttle().await;
-                match self.call_once(&url, &body).await {
+                match self.call_once(&url, &body, &api_key).await {
                     Ok(analysis) => {
                         if idx != start {
                             log::info!("Gemini: usando modelo '{model}' a partir de agora");
@@ -357,24 +407,24 @@ impl GeminiClient {
                     }
                     Err(CallError::NotFound) => {
                         log::warn!("Gemini: modelo '{model}' indisponível (404). Tentando o próximo…");
-                        break; // passa para o próximo modelo
+                        break;
                     }
                     Err(CallError::RateLimited) => {
                         rate_retries += 1;
                         if rate_retries > 3 {
-                            last_err = anyhow!("rate limit (429) persistente no modelo '{model}'");
+                            last_err =
+                                anyhow!("rate limit (429) persistente no modelo '{model}'");
                             break;
                         }
                         let secs = 5 * rate_retries as u64;
                         log::warn!("Gemini: rate limit (429). Aguardando {secs}s antes de re-tentar…");
                         tokio::time::sleep(Duration::from_secs(secs)).await;
-                        // re-tenta o MESMO modelo
                     }
                     Err(CallError::Transient(e)) => {
                         log::warn!("Gemini: erro transitório no modelo '{model}': {e:#}");
                         last_err = e;
                         tokio::time::sleep(Duration::from_secs(2)).await;
-                        break; // tenta o próximo modelo
+                        break;
                     }
                 }
             }
@@ -382,11 +432,16 @@ impl GeminiClient {
         Err(last_err)
     }
 
-    async fn call_once(&self, url: &str, body: &Value) -> Result<GeminiAnalysis, CallError> {
+    async fn call_once(
+        &self,
+        url: &str,
+        body: &Value,
+        api_key: &str,
+    ) -> Result<GeminiAnalysis, CallError> {
         let resp = self
             .http
             .post(url)
-            .header("x-goog-api-key", &self.api_key)
+            .header("x-goog-api-key", api_key)
             .json(body)
             .send()
             .await
@@ -404,17 +459,13 @@ impl GeminiClient {
             return Err(CallError::Transient(anyhow!("HTTP {status}: {text}")));
         }
 
-        let payload: Value = resp
-            .json()
-            .await
-            .map_err(|e| CallError::Transient(e.into()))?;
+        let payload: Value = resp.json().await.map_err(|e| CallError::Transient(e.into()))?;
         let text = payload["candidates"][0]["content"]["parts"][0]["text"]
             .as_str()
             .ok_or_else(|| {
                 CallError::Transient(anyhow!("resposta do Gemini sem candidates/parts: {payload}"))
             })?;
 
-        // Validação estrita: se não bater com o schema exigido, é transitório.
         serde_json::from_str(text.trim())
             .map_err(|e| CallError::Transient(anyhow!("JSON fora do schema ({e}): {text}")))
     }

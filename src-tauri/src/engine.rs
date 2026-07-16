@@ -4,7 +4,7 @@ use crate::models::RawNewsItem;
 use crate::scrapers;
 use rand::Rng;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
@@ -13,9 +13,13 @@ use tauri_plugin_notification::NotificationExt;
 /// para não gerar tempestade de retry/consumo de cota a cada ciclo.
 const MAX_ITEM_FAILURES: u32 = 3;
 
+/// Falhas consecutivas de análise que disparam a rotação de API key.
+const FAILURES_BEFORE_KEY_ROTATION: u32 = 3;
+
 /// Estado global gerenciado pelo Tauri (acessível nos commands).
 pub struct AppState {
     pub db: Mutex<Database>,
+    pub gemini: Arc<GeminiClient>,
 }
 
 /// Loop principal do pregão:
@@ -23,16 +27,7 @@ pub struct AppState {
 ///   evento p/ UI -> notificação nativa se CRITICAL/HIGH.
 ///
 /// Roda em background pelo tokio do próprio Tauri; a UI nunca bloqueia.
-pub async fn run_loop(app: AppHandle) {
-    let gemini = match GeminiClient::from_env() {
-        Ok(g) => g,
-        Err(e) => {
-            log::error!("Motor desligado — {e:#}");
-            let _ = app.emit("engine-error", format!("{e:#}"));
-            return;
-        }
-    };
-
+pub async fn run_loop(app: AppHandle, gemini: Arc<GeminiClient>) {
     let base_interval: u64 = std::env::var("SCRAPE_INTERVAL_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -50,9 +45,6 @@ pub async fn run_loop(app: AppHandle) {
             let _ = app.emit("engine-status", "ONLINE");
         }
         Err(e) => {
-            // Nenhum modelo utilizável: quase sempre a chave não tem acesso a
-            // generateContent. Sinaliza erro na UI, mas segue tentando por ciclo
-            // (pode se resolver se for cota temporária).
             log::error!("Gemini sem modelo utilizável para esta chave: {e:#}");
             let _ = app.emit(
                 "engine-error",
@@ -69,6 +61,8 @@ pub async fn run_loop(app: AppHandle) {
 
     // Contador de falhas por item (dedup_key -> nº de falhas) entre ciclos.
     let mut fail_counts: HashMap<String, u32> = HashMap::new();
+    // Falhas consecutivas (qualquer item) para acionar rotação de chave.
+    let mut consecutive_failures: u32 = 0;
 
     loop {
         let mut batch: Vec<RawNewsItem> = Vec::new();
@@ -132,8 +126,29 @@ pub async fn run_loop(app: AppHandle) {
             analyzed_this_cycle += 1;
             if analyze_and_store(&app, &gemini, &item, &key).await {
                 fail_counts.remove(&key);
+                consecutive_failures = 0;
             } else {
                 *fail_counts.entry(key).or_insert(0) += 1;
+                consecutive_failures += 1;
+
+                // Falhas seguidas podem indicar cota esgotada -> tenta a próxima
+                // API key do pool e recalibra (nova chave pode ter outros modelos).
+                if consecutive_failures >= FAILURES_BEFORE_KEY_ROTATION && gemini.rotate_key() {
+                    consecutive_failures = 0;
+                    log::warn!(
+                        "Gemini: falhas seguidas — rotacionando para a API key #{}",
+                        gemini.active_key_index() + 1
+                    );
+                    match gemini.calibrate().await {
+                        Ok(model) => {
+                            log::info!("Gemini: recalibrado na nova chave -> '{model}'");
+                            let _ = app.emit("engine-status", "ONLINE");
+                        }
+                        Err(e) => {
+                            log::error!("Gemini: nova chave sem modelo utilizável: {e:#}")
+                        }
+                    }
+                }
             }
         }
 

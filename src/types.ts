@@ -17,3 +17,14 @@ export interface NewsEvent {
 }
 
 export type EngineStatus = "CONNECTING" | "ONLINE" | "ERROR";
+
+/** Estado de configuração em runtime, vindo do backend. */
+export interface RuntimeStatus {
+  keys_count: number;
+  active_key: number;
+  asset: string;
+}
+
+export type ImpactLevel = NewsEvent["impact_level"];
+/** Filtro de severidade do feed ("ALL" = todos). */
+export type SeverityFilter = "ALL" | ImpactLevel;

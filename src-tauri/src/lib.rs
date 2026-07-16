@@ -6,9 +6,19 @@ mod scrapers;
 
 use db::Database;
 use engine::AppState;
+use gemini::GeminiClient;
 use models::NewsEvent;
-use std::sync::Mutex;
+use serde::Serialize;
+use std::sync::{Arc, Mutex};
 use tauri::Manager;
+
+/// Estado de configuração enviado à UI (topo do dashboard).
+#[derive(Serialize)]
+struct RuntimeStatus {
+    keys_count: usize,
+    active_key: usize,
+    asset: String,
+}
 
 /// Command: hidrata o dashboard com o histórico local ao abrir o app.
 #[tauri::command]
@@ -18,6 +28,38 @@ fn get_recent_events(
 ) -> Result<Vec<NewsEvent>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.recent(limit.unwrap_or(100)).map_err(|e| e.to_string())
+}
+
+/// Command: adiciona uma nova API key do Gemini ao pool (para quando a atual
+/// esgota a cota). Retorna o total de chaves cadastradas.
+#[tauri::command]
+fn add_api_key(state: tauri::State<'_, AppState>, key: String) -> Result<usize, String> {
+    let key = key.trim().to_string();
+    if key.is_empty() {
+        return Err("Chave vazia".to_string());
+    }
+    Ok(state.gemini.add_key(&key))
+}
+
+/// Command: define o ativo/índice prioritário das análises (ES, NQ, etc.).
+#[tauri::command]
+fn set_priority_asset(state: tauri::State<'_, AppState>, asset: String) -> Result<String, String> {
+    let asset = asset.trim().to_string();
+    if asset.is_empty() {
+        return Err("Ativo vazio".to_string());
+    }
+    state.gemini.set_asset(&asset);
+    Ok(state.gemini.asset())
+}
+
+/// Command: estado de configuração para a UI (nº de chaves, chave ativa, ativo).
+#[tauri::command]
+fn get_runtime_status(state: tauri::State<'_, AppState>) -> RuntimeStatus {
+    RuntimeStatus {
+        keys_count: state.gemini.keys_len(),
+        active_key: state.gemini.active_key_index(),
+        asset: state.gemini.asset(),
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -33,15 +75,34 @@ pub fn run() {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
             let db = Database::open(&data_dir.join("esf_news.db"))?;
-            app.manage(AppState { db: Mutex::new(db) });
+
+            // Cliente Gemini compartilhado (keys + ativo ajustáveis em runtime).
+            let gemini = match GeminiClient::from_env() {
+                Ok(g) => Arc::new(g),
+                Err(e) => {
+                    // Sem chave o app abre, mas o motor não analisa. Erro vai à UI.
+                    log::error!("Gemini indisponível: {e:#}");
+                    return Err(e.into());
+                }
+            };
+
+            app.manage(AppState {
+                db: Mutex::new(db),
+                gemini: gemini.clone(),
+            });
 
             // Loop de ingestão em background — vive enquanto o app viver
             let handle = app.handle().clone();
-            tauri::async_runtime::spawn(engine::run_loop(handle));
+            tauri::async_runtime::spawn(engine::run_loop(handle, gemini));
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_recent_events])
+        .invoke_handler(tauri::generate_handler![
+            get_recent_events,
+            add_api_key,
+            set_priority_asset,
+            get_runtime_status
+        ])
         .run(tauri::generate_context!())
         .expect("erro ao iniciar a aplicação Tauri");
 }

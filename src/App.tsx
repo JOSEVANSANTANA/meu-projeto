@@ -1,39 +1,73 @@
+import { useEffect, useMemo, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { NewsCard } from "./components/NewsCard";
 import { StatusBar } from "./components/StatusBar";
+import { ControlBar } from "./components/ControlBar";
+import { SeverityFilter } from "./components/SeverityFilter";
+import { MomentumChart } from "./components/MomentumChart";
 import { useNewsStream } from "./hooks/useNewsStream";
+import type { RuntimeStatus, SeverityFilter as Filter } from "./types";
 
 /**
  * Dashboard principal — estilo terminal Bloomberg:
- * fundo escuro, fonte monoespaçada, feed ao vivo colorido por sentimento.
+ * fundo escuro, fonte monoespaçada, feed ao vivo colorido por sentimento,
+ * compilado do momento (gráfico), filtro por severidade e controles de
+ * ativo/preço/API key no topo.
  */
 export default function App() {
   const { events, status, lastError } = useNewsStream();
+  const [filter, setFilter] = useState<Filter>("ALL");
+  const [price, setPrice] = useState("");
+  const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
 
-  const critical = events.filter((e) => e.impact_level === "CRITICAL").length;
-  const medium = events.filter((e) => e.impact_level === "MEDIUM").length;
-  const bullish = events.filter((e) => e.sentiment === "BULLISH").length;
-  const bearish = events.filter((e) => e.sentiment === "BEARISH").length;
+  const refreshRuntime = () => {
+    invoke<RuntimeStatus>("get_runtime_status")
+      .then(setRuntime)
+      .catch((e) => console.error("get_runtime_status:", e));
+  };
+
+  useEffect(() => {
+    refreshRuntime();
+  }, []);
+
+  const counts = useMemo(() => {
+    const c: Record<string, number> = {
+      ALL: events.length,
+      CRITICAL: 0,
+      HIGH: 0,
+      MEDIUM: 0,
+      LOW: 0,
+    };
+    for (const e of events) c[e.impact_level] = (c[e.impact_level] ?? 0) + 1;
+    return c;
+  }, [events]);
+
+  const visible = useMemo(
+    () => (filter === "ALL" ? events : events.filter((e) => e.impact_level === filter)),
+    [events, filter],
+  );
+
+  const asset = runtime?.asset ?? "S&P 500 (ES)";
 
   return (
     <div className="flex h-screen flex-col bg-terminal-bg font-mono text-gray-200">
       <StatusBar status={status} eventCount={events.length} />
 
-      {/* Régua de métricas da sessão */}
-      <div className="flex gap-6 border-b border-terminal-border px-4 py-1.5 text-xs">
-        <span>
-          CRITICAL <b className="text-terminal-red">{critical}</b>
-        </span>
-        <span>
-          MEDIUM <b className="text-terminal-amber">{medium}</b>
-        </span>
-        <span>
-          BULLISH <b className="text-terminal-green">{bullish}</b>
-        </span>
-        <span>
-          BEARISH <b className="text-terminal-red">{bearish}</b>
-        </span>
-        <span className="ml-auto text-terminal-dim">
-          FONTES: INVESTING.COM · FINANCIALJUICE · TRUTH SOCIAL
+      <ControlBar
+        status={runtime}
+        price={price}
+        onPriceChange={setPrice}
+        onStatusRefresh={refreshRuntime}
+      />
+
+      {/* Compilado do momento (gráfico) */}
+      <MomentumChart events={events} price={price} asset={asset} />
+
+      {/* Filtro por severidade + fontes */}
+      <div className="flex flex-wrap items-center gap-3 border-b border-terminal-border px-4 py-1.5">
+        <SeverityFilter active={filter} counts={counts} onChange={setFilter} />
+        <span className="ml-auto text-[10px] text-terminal-dim">
+          FED · MARKETWATCH · CNBC · YAHOO FINANCE
         </span>
       </div>
 
@@ -43,25 +77,29 @@ export default function App() {
         </div>
       )}
 
-      {/* Feed ao vivo */}
+      {/* Feed ao vivo (filtrado) */}
       <main className="flex-1 space-y-2 overflow-y-auto p-3">
-        {events.length === 0 ? (
+        {visible.length === 0 ? (
           <div className="mt-24 text-center text-terminal-dim">
-            <p className="text-lg">AGUARDANDO FLUXO DE NOTÍCIAS…</p>
+            <p className="text-lg">
+              {events.length === 0
+                ? "AGUARDANDO FLUXO DE NOTÍCIAS…"
+                : `NENHUM EVENTO "${filter}" NO MOMENTO`}
+            </p>
             <p className="mt-2 text-xs">
-              O motor Rust está varrendo o calendário econômico e os feeds.
-              <br />
-              Eventos de médio e alto impacto (2★/3★, CPI, Payroll, FOMC) aparecem aqui.
+              {events.length === 0
+                ? "O motor Rust está varrendo os feeds. Eventos de médio e alto impacto aparecem aqui."
+                : "Ajuste o filtro de severidade acima."}
             </p>
           </div>
         ) : (
-          events.map((ev) => <NewsCard key={ev.dedup_key} ev={ev} />)
+          visible.map((ev) => <NewsCard key={ev.dedup_key} ev={ev} />)
         )}
       </main>
 
       <footer className="border-t border-terminal-border px-4 py-1 text-[10px] text-terminal-dim">
-        DADOS LOCAIS (SQLITE) · ANÁLISE GEMINI · USO INFORMATIVO — NÃO É
-        RECOMENDAÇÃO DE INVESTIMENTO
+        DADOS LOCAIS (SQLITE) · ANÁLISE GEMINI COM TRAVA ANTI-ALUCINAÇÃO · USO
+        INFORMATIVO — NÃO É RECOMENDAÇÃO DE INVESTIMENTO
       </footer>
     </div>
   );
