@@ -1,0 +1,19 @@
+# Dependências
+node_modules/
+dist/
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# Segredos — NUNCA commitar
+.env
+.env.local
+
+# Banco local
+*.db
+*.sqlite
+
+# Sistema
+.DS_Store
+Thumbs.db

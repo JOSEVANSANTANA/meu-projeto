@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Scrollbar estilo terminal */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0e14;
+}
+::-webkit-scrollbar-thumb {
+  background: #1f2733;
+  border-radius: 4px;
+}
+
+body {
+  overscroll-behavior: none;
+  user-select: none;
+}

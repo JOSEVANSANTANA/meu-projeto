@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Permissões da janela principal: eventos core (stream de notícias Rust -> UI) e notificações nativas do SO. Todo acesso de rede (scraping + Gemini) acontece no backend Rust via reqwest e não precisa de permissão de webview.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "notification:default"
+  ]
+}

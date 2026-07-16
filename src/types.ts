@@ -1,0 +1,19 @@
+/** Espelho TypeScript do struct `NewsEvent` do backend Rust (serde flatten). */
+export interface NewsEvent {
+  id: number;
+  dedup_key: string;
+  received_at_utc: string;
+  source: string;
+  event: string;
+  impact_level: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
+  actual: string;
+  forecast: string;
+  previous: string;
+  sentiment: "BULLISH" | "BEARISH" | "NEUTRAL";
+  sp500_direction_probability: { up: number; down: number };
+  projected_target_pts: string;
+  rationale: string;
+  alert_type: "HIGH_VOLATILITY" | "TREND_CONFIRMATION" | "REVERSAL_RISK" | "INFO";
+}
+
+export type EngineStatus = "CONNECTING" | "ONLINE" | "ERROR";

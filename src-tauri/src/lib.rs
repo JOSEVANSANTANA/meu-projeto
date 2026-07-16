@@ -1,0 +1,47 @@
+mod db;
+mod engine;
+mod gemini;
+mod models;
+mod scrapers;
+
+use db::Database;
+use engine::AppState;
+use models::NewsEvent;
+use std::sync::Mutex;
+use tauri::Manager;
+
+/// Command: hidrata o dashboard com o histórico local ao abrir o app.
+#[tauri::command]
+fn get_recent_events(
+    state: tauri::State<'_, AppState>,
+    limit: Option<u32>,
+) -> Result<Vec<NewsEvent>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.recent(limit.unwrap_or(100)).map_err(|e| e.to_string())
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    // Carrega .env da raiz do projeto (GEMINI_API_KEY etc.)
+    dotenvy::dotenv().ok();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
+    tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
+        .setup(|app| {
+            // SQLite no diretório de dados do app (ex.: %APPDATA% no Windows)
+            let data_dir = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&data_dir)?;
+            let db = Database::open(&data_dir.join("esf_news.db"))?;
+            app.manage(AppState { db: Mutex::new(db) });
+
+            // Loop de ingestão em background — vive enquanto o app viver
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(engine::run_loop(handle));
+
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![get_recent_events])
+        .run(tauri::generate_context!())
+        .expect("erro ao iniciar a aplicação Tauri");
+}
