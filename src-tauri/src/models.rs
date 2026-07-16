@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+/// Versão do formato de análise. Incrementar invalida o cache de dedup e
+/// força re-análise das notícias já vistas (ex.: ao passar a traduzir p/ PT).
+pub const ANALYSIS_VERSION: &str = "v2-pt";
+
 /// Item bruto capturado pelos scrapers, antes da análise do Gemini.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RawNewsItem {
@@ -22,6 +26,10 @@ impl RawNewsItem {
     pub fn dedup_key_for(&self, asset: &str) -> String {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
+        // Versão da análise: ao mudar o prompt (ex.: tradução p/ PT), incremente
+        // para forçar re-análise das notícias já vistas sob o novo formato.
+        hasher.update(ANALYSIS_VERSION.as_bytes());
+        hasher.update([0u8]);
         hasher.update(asset.as_bytes());
         hasher.update([0u8]);
         hasher.update(self.source.as_bytes());

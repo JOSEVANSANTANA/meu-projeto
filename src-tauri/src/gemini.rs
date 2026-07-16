@@ -15,12 +15,14 @@ fn system_prompt(asset: &str) -> String {
 REGRAS ABSOLUTAS — VIOLAÇÃO NÃO É PERMITIDA:
 1. Responda ESTRITAMENTE com um único objeto JSON válido. Sem markdown, sem cercas de código, sem texto antes ou depois.
 2. O JSON deve conter EXATAMENTE estes campos: source, event, impact_level, actual, forecast, previous, sentiment, sp500_direction_probability (objeto com "up" e "down" inteiros somando 100), projected_target_pts, rationale, alert_type.
-3. O campo sp500_direction_probability representa a probabilidade direcional do ATIVO PRIORITÁRIO ({asset}) — mesmo que o nome do campo mencione sp500. sentiment e projected_target_pts também se referem a {asset}.
-4. impact_level: um de "CRITICAL", "HIGH", "MEDIUM", "LOW". CPI, Core CPI, Nonfarm Payrolls, decisão de juros do FOMC e falas do presidente do Fed com surpresa vs. consenso são "CRITICAL". Surpresas moderadas em PPI, GDP, Retail Sales, Jobless Claims são "HIGH".
-5. sentiment: um de "BULLISH", "BEARISH", "NEUTRAL" — da perspectiva de {asset}, não da economia. Ex.: CPI acima do esperado = pressão de juros = tipicamente BEARISH para índices acionários.
-6. projected_target_pts: estimativa de movimento em PONTOS de {asset} no formato "+15 pts", "-25 pts" ou "0 pts", calibrada pela magnitude da surpresa (actual vs. forecast).
-7. rationale: máximo de 2 frases, direto, em português.
-8. alert_type: um de "HIGH_VOLATILITY", "TREND_CONFIRMATION", "REVERSAL_RISK", "INFO".
+3. IDIOMA: TODO texto de saída deve estar em PORTUGUÊS BRASILEIRO. O campo "event" deve ser a TRADUÇÃO fiel e concisa da manchete original para o português (traduza, não invente conteúdo). O "rationale" também em português.
+4. O campo sp500_direction_probability representa a probabilidade direcional do ATIVO PRIORITÁRIO ({asset}) — mesmo que o nome do campo mencione sp500. sentiment e projected_target_pts também se referem a {asset}.
+5. CORRELAÇÃO POR ATIVO: analise o impacto ESPECÍFICO para {asset}. Índices reagem diferente à mesma notícia: Nasdaq-100 (NQ/MNQ) tem forte peso em tecnologia e é MAIS sensível a juros; Russell 2000 (RTY/M2K) é small cap doméstico, sensível a crédito e ciclo interno dos EUA; Dow (YM/MYM) é industrial/valor; S&P 500 (ES/MES) é amplo; Nikkei (NKD) segue o Japão e o iene. Calibre sentiment, probabilidade e pontos conforme o ativo escolhido.
+6. impact_level: um de "CRITICAL", "HIGH", "MEDIUM", "LOW". CPI, Core CPI, Nonfarm Payrolls, decisão de juros do FOMC e falas do presidente do Fed com surpresa vs. consenso são "CRITICAL". Surpresas moderadas em PPI, GDP, Retail Sales, Jobless Claims são "HIGH".
+7. sentiment: um de "BULLISH", "BEARISH", "NEUTRAL" — da perspectiva de {asset}, não da economia. Ex.: CPI acima do esperado = pressão de juros = tipicamente BEARISH para índices acionários.
+8. projected_target_pts: estimativa de movimento em PONTOS de {asset} no formato "+15 pts", "-25 pts" ou "0 pts", calibrada pela magnitude da surpresa (actual vs. forecast).
+9. rationale: máximo de 2 frases, direto, em português.
+10. alert_type: um de "HIGH_VOLATILITY", "TREND_CONFIRMATION", "REVERSAL_RISK", "INFO".
 
 TRAVA ANTI-ALUCINAÇÃO (CRÍTICO — a precisão vale mais que a ousadia):
 A. Baseie-se EXCLUSIVAMENTE no texto fornecido (manchete + actual/forecast/previous). É PROIBIDO inventar números, percentuais, valores de consenso, datas ou eventos que não estejam explicitamente na entrada.

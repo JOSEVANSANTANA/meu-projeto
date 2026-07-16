@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { RuntimeStatus } from "../types";
+import type { AssetResolution, RuntimeStatus } from "../types";
 
 /**
  * Barra de controles do topo:
@@ -32,10 +32,14 @@ export function ControlBar({
     const asset = assetInput.trim();
     if (!asset) return;
     try {
-      const applied = await invoke<string>("set_priority_asset", { asset });
+      const r = await invoke<AssetResolution>("set_priority_asset", { asset });
       setAssetInput("");
       onStatusRefresh();
-      flash(`Ativo prioritário: ${applied}`);
+      if (r.recognized) {
+        flash(`✓ ${asset.toUpperCase()} → ${r.name}`);
+      } else {
+        flash(`⚠ "${asset}" não reconhecido — análise genérica`);
+      }
     } catch (e) {
       flash(`Erro: ${e}`);
     }
@@ -89,7 +93,17 @@ export function ControlBar({
 
       {/* Nova API key — topo direito */}
       <div className="ml-auto flex items-center gap-2">
-        {msg && <span className="text-terminal-green">{msg}</span>}
+        {msg && (
+          <span
+            className={
+              msg.startsWith("✓")
+                ? "text-terminal-green"
+                : "text-terminal-amber"
+            }
+          >
+            {msg}
+          </span>
+        )}
         <span className="text-terminal-dim">
           KEYS: <b className="text-white">{status?.keys_count ?? 1}</b> (ativa #
           {(status?.active_key ?? 0) + 1})

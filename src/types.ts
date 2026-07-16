@@ -29,3 +29,10 @@ export interface RuntimeStatus {
 export type ImpactLevel = NewsEvent["impact_level"];
 /** Filtro de severidade do feed ("ALL" = todos). */
 export type SeverityFilter = "ALL" | ImpactLevel;
+
+/** Resultado da resolução de um ativo (código ou nome) no backend. */
+export interface AssetResolution {
+  code: string;
+  name: string;
+  recognized: boolean;
+}

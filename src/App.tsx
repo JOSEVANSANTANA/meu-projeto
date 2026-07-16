@@ -4,7 +4,7 @@ import { NewsCard } from "./components/NewsCard";
 import { StatusBar } from "./components/StatusBar";
 import { ControlBar } from "./components/ControlBar";
 import { SeverityFilter } from "./components/SeverityFilter";
-import { MomentumChart } from "./components/MomentumChart";
+import { PriceLevels } from "./components/PriceLevels";
 import { SentimentPies } from "./components/SentimentPies";
 import { useNewsStream } from "./hooks/useNewsStream";
 import { registerNotificationClickFocus } from "./lib/nativeAlerts";
@@ -75,10 +75,10 @@ export default function App() {
         onStatusRefresh={refreshRuntime}
       />
 
-      {/* Compilado do momento (viés + momentum + níveis projetados) */}
-      <MomentumChart events={assetEvents} price={price} asset={asset} />
+      {/* Níveis projetados (compacto, só quando há preço informado) */}
+      <PriceLevels events={assetEvents} price={price} />
 
-      {/* Pizzas de sentimento: geral / 30min / 5min */}
+      {/* Pizzas de sentimento com filtro de tempo por pizza */}
       <SentimentPies events={assetEvents} />
 
       {/* Filtro por severidade + fontes */}

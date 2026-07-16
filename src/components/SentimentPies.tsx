@@ -1,8 +1,18 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { NewsEvent } from "../types";
 import { sentimentShare, withinLastMinutes, type SentimentShare } from "../lib/analytics";
 
-/** Donut SVG com as fatias compra (verde) / venda (vermelho) / neutro (cinza). */
+/** Opções de janela de tempo (0 = Geral / todos os eventos). */
+const TIMEFRAMES: Array<{ label: string; minutes: number }> = [
+  { label: "Geral", minutes: 0 },
+  { label: "1 min", minutes: 1 },
+  { label: "5 min", minutes: 5 },
+  { label: "30 min", minutes: 30 },
+  { label: "1 hora", minutes: 60 },
+  { label: "4 horas", minutes: 240 },
+];
+
+/** Donut SVG: compra (verde) / venda (vermelho) / neutro (cinza). */
 function Donut({ s }: { s: SentimentShare }) {
   const r = 26;
   const c = 2 * Math.PI * r;
@@ -13,7 +23,6 @@ function Donut({ s }: { s: SentimentShare }) {
   ];
   let offset = 0;
   const empty = s.count === 0;
-
   return (
     <svg viewBox="0 0 72 72" className="h-20 w-20">
       <g transform="rotate(-90 36 36)">
@@ -42,14 +51,31 @@ function Donut({ s }: { s: SentimentShare }) {
   );
 }
 
-function Pie({ title, s }: { title: string; s: SentimentShare }) {
+/** Uma pizza com seu próprio seletor de janela de tempo. */
+function Pie({ events, initial, now }: { events: NewsEvent[]; initial: number; now: number }) {
+  const [minutes, setMinutes] = useState(initial);
+  const scoped = useMemo(
+    () => (minutes === 0 ? events : withinLastMinutes(events, minutes, now)),
+    [events, minutes, now],
+  );
+  const s = sentimentShare(scoped);
+
   return (
     <div className="flex items-center gap-3">
       <Donut s={s} />
       <div className="text-[11px] leading-tight">
-        <div className="mb-1 text-[10px] uppercase tracking-widest text-terminal-dim">
-          {title} <span className="opacity-60">({s.count})</span>
-        </div>
+        <select
+          value={minutes}
+          onChange={(e) => setMinutes(Number(e.target.value))}
+          className="mb-1 rounded-sm border border-terminal-border bg-terminal-bg px-1 py-0.5 text-[10px] uppercase tracking-widest text-terminal-amber focus:border-terminal-amber focus:outline-none"
+        >
+          {TIMEFRAMES.map((t) => (
+            <option key={t.minutes} value={t.minutes}>
+              {t.label}
+            </option>
+          ))}
+        </select>
+        <span className="ml-1 text-terminal-dim">({s.count})</span>
         <div className="text-terminal-green">● COMPRA {s.buy}%</div>
         <div className="text-terminal-red">● VENDA {s.sell}%</div>
         <div className="text-terminal-dim">● NEUTRO {s.neutral}%</div>
@@ -59,27 +85,17 @@ function Pie({ title, s }: { title: string; s: SentimentShare }) {
 }
 
 /**
- * Três pizzas de sentimento (compra/venda/neutro), ponderadas por impacto:
- * Geral, últimos 30 min e últimos 5 min. Base para leitura rápida do humor
- * do mercado conforme as notícias chegam.
+ * Três pizzas de sentimento (compra/venda/neutro), ponderadas por impacto.
+ * Cada uma tem seletor próprio de janela (Geral/1m/5m/30m/1h/4h) — você pode,
+ * por exemplo, deixar as três em 5 min. Padrão: Geral / 30 min / 5 min.
  */
 export function SentimentPies({ events }: { events: NewsEvent[] }) {
   const now = Date.now();
-  const geral = useMemo(() => sentimentShare(events), [events]);
-  const m30 = useMemo(
-    () => sentimentShare(withinLastMinutes(events, 30, now)),
-    [events, now],
-  );
-  const m5 = useMemo(
-    () => sentimentShare(withinLastMinutes(events, 5, now)),
-    [events, now],
-  );
-
   return (
     <section className="flex flex-wrap items-center gap-8 border-b border-terminal-border bg-terminal-panel px-4 py-3">
-      <Pie title="Geral" s={geral} />
-      <Pie title="30 min" s={m30} />
-      <Pie title="5 min" s={m5} />
+      <Pie events={events} initial={0} now={now} />
+      <Pie events={events} initial={30} now={now} />
+      <Pie events={events} initial={5} now={now} />
     </section>
   );
 }

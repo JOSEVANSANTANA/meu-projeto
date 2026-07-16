@@ -1,12 +1,14 @@
 mod db;
 mod engine;
 mod gemini;
+mod instruments;
 mod models;
 mod scrapers;
 
 use db::Database;
 use engine::AppState;
 use gemini::GeminiClient;
+use instruments::Resolved;
 use models::NewsEvent;
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
@@ -42,14 +44,20 @@ fn add_api_key(state: tauri::State<'_, AppState>, key: String) -> Result<usize, 
 }
 
 /// Command: define o ativo/índice prioritário das análises (ES, NQ, etc.).
+/// Resolve por CÓDIGO (mesu6, es…) ou NOME (micro nasdaq…) para o instrumento
+/// real e devolve o que foi reconhecido — assim a UI confirma o vínculo.
 #[tauri::command]
-fn set_priority_asset(state: tauri::State<'_, AppState>, asset: String) -> Result<String, String> {
-    let asset = asset.trim().to_string();
-    if asset.is_empty() {
+fn set_priority_asset(
+    state: tauri::State<'_, AppState>,
+    asset: String,
+) -> Result<Resolved, String> {
+    if asset.trim().is_empty() {
         return Err("Ativo vazio".to_string());
     }
-    state.gemini.set_asset(&asset);
-    Ok(state.gemini.asset())
+    let resolved = instruments::resolve(&asset);
+    // Grava o nome canônico (reconhecido) ou o texto cru (não reconhecido).
+    state.gemini.set_asset(&resolved.name);
+    Ok(resolved)
 }
 
 /// Command: estado de configuração para a UI (nº de chaves, chave ativa, ativo).
@@ -85,6 +93,11 @@ pub fn run() {
                     return Err(e.into());
                 }
             };
+
+            // Normaliza o ativo padrão para o nome canônico do instrumento.
+            let resolved = instruments::resolve(&gemini.asset());
+            gemini.set_asset(&resolved.name);
+            log::info!("Ativo prioritário inicial: {}", resolved.name);
 
             app.manage(AppState {
                 db: Mutex::new(db),
