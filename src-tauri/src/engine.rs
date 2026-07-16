@@ -34,6 +34,11 @@ pub async fn run_loop(app: AppHandle) {
         .unwrap_or(30);
 
     log::info!("Motor de ingestão iniciado (ciclo base: {base_interval}s)");
+
+    // Diagnóstico: lista os modelos que a chave realmente pode usar. Se der
+    // 404 nas análises, é aqui que se confere o nome correto do modelo.
+    gemini.log_available_models().await;
+
     let _ = app.emit("engine-status", "ONLINE");
 
     loop {

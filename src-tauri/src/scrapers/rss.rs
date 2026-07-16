@@ -10,9 +10,11 @@ use anyhow::Result;
 ///
 /// Fontes padrão (todas gratuitas, macro, de alta credibilidade):
 ///   - Federal Reserve  -> decisões do FOMC, juros, discursos (oficial)
-///   - U.S. BLS         -> CPI e Employment Situation/Payroll (oficial)
-///   - MarketWatch      -> manchetes de mercado em tempo real
+///   - MarketWatch      -> manchetes de mercado em tempo real (inclui CPI/NFP)
 ///   - CNBC (Economia)  -> cobertura macro dos EUA
+///
+/// (O feed do BLS foi removido dos padrões: bls.gov retorna 403 a este
+/// cliente. CPI e Payroll ainda chegam pela cobertura de MarketWatch/CNBC.)
 ///
 /// Você pode acrescentar/trocar feeds via variável RSS_FEEDS no .env
 /// (formato: "Nome|url,Nome|url").
@@ -21,10 +23,6 @@ fn default_feeds() -> Vec<(String, String)> {
         (
             "Federal Reserve".into(),
             "https://www.federalreserve.gov/feeds/press_all.xml".into(),
-        ),
-        (
-            "U.S. BLS".into(),
-            "https://www.bls.gov/feed/bls_latest.rss".into(),
         ),
         (
             "MarketWatch".into(),

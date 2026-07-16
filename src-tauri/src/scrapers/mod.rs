@@ -68,5 +68,23 @@ pub fn is_high_impact_headline(headline: &str) -> bool {
         "trump", "white house", "geopolit", "war",
     ];
     let h = headline.to_lowercase();
-    KEYWORDS.iter().any(|k| h.contains(k))
+    KEYWORDS.iter().any(|k| h.contains(k)) && !is_market_noise(&h)
+}
+
+/// Descarta manchetes regulatórias/administrativas que casam nas keywords
+/// (ex.: "Federal Reserve") mas NÃO movem o mercado — economiza cota da API
+/// do Gemini. Recebe a manchete já em minúsculas.
+fn is_market_noise(headline_lower: &str) -> bool {
+    const NOISE: &[&str] = &[
+        "enforcement",           // "issues enforcement action with ..."
+        "anti-money laundering",
+        "bank secrecy",
+        "passing of",            // notas de falecimento
+        "personnel",
+        "appoints",
+        "elects",
+        "nomination",
+        "designation of",
+    ];
+    NOISE.iter().any(|k| headline_lower.contains(k))
 }
