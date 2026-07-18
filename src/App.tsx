@@ -7,6 +7,7 @@ import { SeverityFilter } from "./components/SeverityFilter";
 import { PriceLevels } from "./components/PriceLevels";
 import { SentimentPies } from "./components/SentimentPies";
 import { Scoreboard } from "./components/Scoreboard";
+import { FeedManager } from "./components/FeedManager";
 import { useNewsStream } from "./hooks/useNewsStream";
 import { registerNotificationClickFocus } from "./lib/nativeAlerts";
 import type { RuntimeStatus, SeverityFilter as Filter } from "./types";
@@ -75,6 +76,9 @@ export default function App() {
         onPriceChange={setPrice}
         onStatusRefresh={refreshRuntime}
       />
+
+      {/* Fontes RSS personalizadas (cole a URL) */}
+      <FeedManager />
 
       {/* Níveis projetados (compacto, só quando há preço informado) */}
       <PriceLevels events={assetEvents} price={price} />

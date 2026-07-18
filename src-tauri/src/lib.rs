@@ -5,6 +5,7 @@ mod instruments;
 mod models;
 mod prices;
 mod scrapers;
+mod settings;
 
 use db::Database;
 use engine::AppState;
@@ -33,15 +34,81 @@ fn get_recent_events(
     db.recent(limit.unwrap_or(100)).map_err(|e| e.to_string())
 }
 
+/// Resultado da adição de um feed RSS (com validação/autodescoberta).
+#[derive(Serialize)]
+struct AddFeedResult {
+    url: String,
+    count: usize,
+}
+
+/// Persiste chaves + ativo + feeds RSS atuais no settings.json (best-effort).
+fn persist_settings(state: &AppState) {
+    let s = settings::Settings {
+        api_keys: state.gemini.keys(),
+        asset: Some(state.gemini.asset()),
+        rss_feeds: state
+            .extra_feeds
+            .lock()
+            .map(|f| f.clone())
+            .unwrap_or_default(),
+    };
+    settings::save(&state.settings_path, &s);
+}
+
+/// Command: adiciona uma fonte RSS pela URL. Valida e AUTODESCOBRE o feed
+/// (aceita colar o site, ex.: https://finance.yahoo.com/). Persiste em disco.
+#[tauri::command]
+async fn add_rss_feed(
+    state: tauri::State<'_, AppState>,
+    url: String,
+) -> Result<AddFeedResult, String> {
+    let url = url.trim().to_string();
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err("URL inválida — comece com http:// ou https://".to_string());
+    }
+    let (feed_url, count) = scrapers::rss::probe_feed(&url).await.map_err(|e| e.to_string())?;
+    {
+        let mut feeds = state.extra_feeds.lock().map_err(|e| e.to_string())?;
+        if !feeds.contains(&feed_url) {
+            feeds.push(feed_url.clone());
+        }
+    }
+    persist_settings(&state);
+    Ok(AddFeedResult { url: feed_url, count })
+}
+
+/// Command: lista as fontes RSS adicionadas pelo usuário.
+#[tauri::command]
+fn get_rss_feeds(state: tauri::State<'_, AppState>) -> Vec<String> {
+    state.extra_feeds.lock().map(|f| f.clone()).unwrap_or_default()
+}
+
+/// Command: remove uma fonte RSS.
+#[tauri::command]
+fn remove_rss_feed(
+    state: tauri::State<'_, AppState>,
+    url: String,
+) -> Result<Vec<String>, String> {
+    let list = {
+        let mut feeds = state.extra_feeds.lock().map_err(|e| e.to_string())?;
+        feeds.retain(|u| u != &url);
+        feeds.clone()
+    };
+    persist_settings(&state);
+    Ok(list)
+}
+
 /// Command: adiciona uma nova API key do Gemini ao pool (para quando a atual
-/// esgota a cota). Retorna o total de chaves cadastradas.
+/// esgota a cota) e PERSISTE em disco. Retorna o total de chaves cadastradas.
 #[tauri::command]
 fn add_api_key(state: tauri::State<'_, AppState>, key: String) -> Result<usize, String> {
     let key = key.trim().to_string();
     if key.is_empty() {
         return Err("Chave vazia".to_string());
     }
-    Ok(state.gemini.add_key(&key))
+    let total = state.gemini.add_key(&key);
+    persist_settings(&state);
+    Ok(total)
 }
 
 /// Command: define o ativo/índice prioritário das análises (ES, NQ, etc.).
@@ -58,6 +125,7 @@ fn set_priority_asset(
     let resolved = instruments::resolve(&asset);
     // Grava o nome canônico (reconhecido) ou o texto cru (não reconhecido).
     state.gemini.set_asset(&resolved.name);
+    persist_settings(&state);
     Ok(resolved)
 }
 
@@ -111,11 +179,30 @@ pub fn run() {
             // Normaliza o ativo padrão para o nome canônico do instrumento.
             let resolved = instruments::resolve(&gemini.asset());
             gemini.set_asset(&resolved.name);
-            log::info!("Ativo prioritário inicial: {}", resolved.name);
+
+            // PERSISTÊNCIA: carrega chaves + ativo salvos e aplica por cima do
+            // que veio do .env (assim a chave informada uma vez sobrevive a
+            // reinícios, sem precisar redigitar).
+            let settings_path = data_dir.join("settings.json");
+            let saved = settings::load(&settings_path);
+            for k in &saved.api_keys {
+                gemini.add_key(k);
+            }
+            if let Some(a) = saved.asset.as_ref().filter(|a| !a.trim().is_empty()) {
+                gemini.set_asset(&instruments::resolve(a).name);
+            }
+            log::info!(
+                "Ativo prioritário: {} | chaves carregadas: {} | feeds RSS extras: {}",
+                gemini.asset(),
+                gemini.keys_len(),
+                saved.rss_feeds.len()
+            );
 
             app.manage(AppState {
                 db: Mutex::new(db),
                 gemini: gemini.clone(),
+                settings_path,
+                extra_feeds: Mutex::new(saved.rss_feeds),
             });
 
             // Loop de ingestão em background — vive enquanto o app viver
@@ -129,7 +216,10 @@ pub fn run() {
             add_api_key,
             set_priority_asset,
             get_runtime_status,
-            get_accuracy
+            get_accuracy,
+            add_rss_feed,
+            get_rss_feeds,
+            remove_rss_feed
         ])
         .run(tauri::generate_context!())
         .expect("erro ao iniciar a aplicação Tauri");

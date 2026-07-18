@@ -37,6 +37,12 @@ export interface AssetResolution {
   recognized: boolean;
 }
 
+/** Resultado da adição de uma fonte RSS. */
+export interface AddFeedResult {
+  url: string;
+  count: number;
+}
+
 /** Acerto por nível de impacto. */
 export interface ImpactAccuracy {
   impact_level: string;

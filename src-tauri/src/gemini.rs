@@ -204,6 +204,11 @@ impl GeminiClient {
         self.keys.lock().expect("keys mutex").len()
     }
 
+    /// Snapshot das chaves atuais (para persistir em disco).
+    pub fn keys(&self) -> Vec<String> {
+        self.keys.lock().expect("keys mutex").clone()
+    }
+
     pub fn has_keys(&self) -> bool {
         !self.keys.lock().expect("keys mutex").is_empty()
     }

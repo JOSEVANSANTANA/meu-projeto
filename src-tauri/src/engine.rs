@@ -20,6 +20,10 @@ const FAILURES_BEFORE_KEY_ROTATION: u32 = 3;
 pub struct AppState {
     pub db: Mutex<Database>,
     pub gemini: Arc<GeminiClient>,
+    /// Caminho do settings.json (persistência de chaves + ativo).
+    pub settings_path: std::path::PathBuf,
+    /// Feeds RSS adicionados pelo usuário (URLs), ajustáveis em runtime.
+    pub extra_feeds: Mutex<Vec<String>>,
 }
 
 /// Loop principal do pregão:
@@ -83,8 +87,13 @@ pub async fn run_loop(app: AppHandle, gemini: Arc<GeminiClient>) {
         // Pilar 1 — conectores rodam em sequência, cada um com seu
         // polite_delay() interno (2–5s aleatórios por requisição).
 
-        // Fonte principal: feeds RSS (robusta, sem bloqueio, sem chave).
-        match scrapers::rss::fetch_all().await {
+        // Fonte principal: feeds RSS (padrão + os que o usuário adicionou).
+        let extra_feeds = {
+            let state = app.state::<AppState>();
+            let f = state.extra_feeds.lock().expect("extra_feeds mutex");
+            f.clone()
+        };
+        match scrapers::rss::fetch_all(&extra_feeds).await {
             Ok(mut v) => batch.append(&mut v),
             Err(e) => log::warn!("Feeds RSS falharam neste ciclo: {e:#}"),
         }
