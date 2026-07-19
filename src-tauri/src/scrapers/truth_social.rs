@@ -1,7 +1,11 @@
 use crate::models::RawNewsItem;
 use crate::scrapers::rss;
-use anyhow::{anyhow, Result};
+use anyhow::Result;
+#[cfg(desktop)]
+use anyhow::anyhow;
+#[cfg(desktop)]
 use serde::Deserialize;
+#[cfg(desktop)]
 use std::time::Duration;
 
 /// Ingestão do Truth Social em DUAS camadas:
@@ -81,6 +85,7 @@ fn is_market_relevant_post(text: &str) -> bool {
 // Camada 2 — conector logado (home timeline) via subprocesso Python
 // ---------------------------------------------------------------------------
 
+#[cfg(desktop)]
 #[derive(Deserialize)]
 struct PyPost {
     source: String,
@@ -89,8 +94,17 @@ struct PyPost {
     created_at: Option<String>,
 }
 
+/// No iOS/Android não há como spawnar o subprocesso Python (sandbox). O
+/// conector LOGADO fica indisponível no mobile; o espelho do Trump (RSS)
+/// segue funcionando normalmente.
+#[cfg(mobile)]
+async fn fetch_following() -> Result<Vec<RawNewsItem>> {
+    Ok(Vec::new())
+}
+
 /// Só roda se houver credenciais configuradas (TRUTHSOCIAL_TOKEN OU
 /// TRUTHSOCIAL_USERNAME+PASSWORD). Caso contrário, fica inerte (Ok vazio).
+#[cfg(desktop)]
 async fn fetch_following() -> Result<Vec<RawNewsItem>> {
     let has_token = std::env::var("TRUTHSOCIAL_TOKEN")
         .map(|v| !v.trim().is_empty())

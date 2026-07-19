@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "updater-desktop",
+  "description": "Permissão do auto-update — apenas desktop (no iOS/Android a atualização vem pela loja).",
+  "platforms": ["windows", "macOS", "linux"],
+  "windows": ["main"],
+  "permissions": ["updater:default"]
+}

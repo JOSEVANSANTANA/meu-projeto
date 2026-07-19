@@ -159,9 +159,15 @@ pub fn run() {
     }
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    tauri::Builder::default()
-        .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+    #[allow(unused_mut)]
+    let mut builder = tauri::Builder::default().plugin(tauri_plugin_notification::init());
+    // Auto-update é só desktop (no iOS a atualização vem pela App Store).
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+
+    builder
         .setup(|app| {
             // SQLite + .env também no diretório de dados do app (%APPDATA%).
             let data_dir = app.path().app_data_dir()?;
