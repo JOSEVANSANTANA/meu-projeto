@@ -1,2 +1,7 @@
-# Dependencia unica: cliente HTTP para falar com a API do Canva.
+# Dependencias.
 requests>=2.31.0
+Pillow>=10.0.0
+numpy>=1.24.0
+# Opcional (recorte de foto SEM fundo verde, por IA):
+# rembg>=2.0.50
+# onnxruntime>=1.16.0
