@@ -1,0 +1,12 @@
+# Nao versionar fotos das pessoas nem banners gerados (dados/saidas)
+fotos/*
+!fotos/LEIA-ME.txt
+saida/*
+!saida/.gitkeep
+# Fontes .ttf (baixe separadamente conforme o LEIA-ME) e templates opcionais
+fontes/*.ttf
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/

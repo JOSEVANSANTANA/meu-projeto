@@ -1,0 +1,127 @@
+{
+  "_ajuda": "Este arquivo define o layout de cada dia. Coordenadas em PIXELS, medidas a partir do canto SUPERIOR ESQUERDO. O canvas do Story do Instagram tem 1080 x 1920. Ajuste os valores conforme a arte exportada do Canva. NAO precisa saber programar: mude apenas os numeros e textos entre aspas.",
+
+  "canvas": {
+    "largura": 1080,
+    "altura": 1920,
+    "cor_fundo": "#000000"
+  },
+
+  "dias": {
+    "segunda": {
+      "template": "templates/segunda.png",
+      "foto": {
+        "x": 240,
+        "y": 520,
+        "largura": 600,
+        "altura": 600,
+        "formato": "circulo",
+        "raio_borda": 40
+      },
+      "texto": {
+        "x": 540,
+        "y": 1240,
+        "conteudo_prefixo": "",
+        "fonte": "fontes/Montserrat-Bold.ttf",
+        "tamanho": 90,
+        "cor": "#FFFFFF",
+        "ancora": "centro",
+        "largura_max": 900,
+        "maiusculas": true,
+        "sombra": true
+      }
+    },
+    "terca": {
+      "template": "templates/terca.png",
+      "foto": {
+        "x": 240,
+        "y": 520,
+        "largura": 600,
+        "altura": 600,
+        "formato": "circulo",
+        "raio_borda": 40
+      },
+      "texto": {
+        "x": 540,
+        "y": 1240,
+        "conteudo_prefixo": "",
+        "fonte": "fontes/Montserrat-Bold.ttf",
+        "tamanho": 90,
+        "cor": "#FFFFFF",
+        "ancora": "centro",
+        "largura_max": 900,
+        "maiusculas": true,
+        "sombra": true
+      }
+    },
+    "quarta": {
+      "template": "templates/quarta.png",
+      "foto": {
+        "x": 240,
+        "y": 520,
+        "largura": 600,
+        "altura": 600,
+        "formato": "circulo",
+        "raio_borda": 40
+      },
+      "texto": {
+        "x": 540,
+        "y": 1240,
+        "conteudo_prefixo": "",
+        "fonte": "fontes/Montserrat-Bold.ttf",
+        "tamanho": 90,
+        "cor": "#FFFFFF",
+        "ancora": "centro",
+        "largura_max": 900,
+        "maiusculas": true,
+        "sombra": true
+      }
+    },
+    "quinta": {
+      "template": "templates/quinta.png",
+      "foto": {
+        "x": 240,
+        "y": 520,
+        "largura": 600,
+        "altura": 600,
+        "formato": "circulo",
+        "raio_borda": 40
+      },
+      "texto": {
+        "x": 540,
+        "y": 1240,
+        "conteudo_prefixo": "",
+        "fonte": "fontes/Montserrat-Bold.ttf",
+        "tamanho": 90,
+        "cor": "#FFFFFF",
+        "ancora": "centro",
+        "largura_max": 900,
+        "maiusculas": true,
+        "sombra": true
+      }
+    },
+    "sexta": {
+      "template": "templates/sexta.png",
+      "foto": {
+        "x": 240,
+        "y": 520,
+        "largura": 600,
+        "altura": 600,
+        "formato": "circulo",
+        "raio_borda": 40
+      },
+      "texto": {
+        "x": 540,
+        "y": 1240,
+        "conteudo_prefixo": "",
+        "fonte": "fontes/Montserrat-Bold.ttf",
+        "tamanho": 90,
+        "cor": "#FFFFFF",
+        "ancora": "centro",
+        "largura_max": 900,
+        "maiusculas": true,
+        "sombra": true
+      }
+    }
+  }
+}

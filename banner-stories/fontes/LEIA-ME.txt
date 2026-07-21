@@ -1,0 +1,5 @@
+Coloque aqui os arquivos de fonte (.ttf) usados nos banners.
+O config.json ja aponta para: Montserrat-Bold.ttf
+
+Baixe a Montserrat gratis em: https://fonts.google.com/specimen/Montserrat
+Extraia o ZIP e copie o arquivo Montserrat-Bold.ttf para esta pasta.

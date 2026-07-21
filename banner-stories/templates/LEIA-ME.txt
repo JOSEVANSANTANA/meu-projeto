@@ -1,0 +1,12 @@
+Coloque aqui os 5 templates de fundo exportados do Canva, em PNG, tamanho 1080 x 1920:
+  segunda.png
+  terca.png
+  quarta.png
+  quinta.png
+  sexta.png
+
+IMPORTANTE:
+- Exporte do Canva SEM a foto da pessoa e SEM o nome (deixe esses espacos vazios/transparentes).
+- Onde entra a foto, deixe um espaco vazio (o programa cola a foto por baixo do template).
+- Se o template tiver uma MOLDURA por cima da foto, exporte em PNG com fundo transparente
+  nessa area para a foto aparecer atras da moldura.
