@@ -42,11 +42,11 @@ API_BASE = "https://api.canva.com/rest/v1"
 # Escopos (permissoes) que o app precisa. Devem bater com o que voce marcar
 # no Portal do Desenvolvedor do Canva.
 ESCOPOS = [
-    "asset:write",              # enviar a foto
-    "brand_template:meta:read", # listar/identificar o template
-    "brand_template:content:read",  # ler os campos (dataset) do template
-    "design:content:write",     # criar o design via autofill
-    "design:content:read",      # exportar o design
+    "asset:write",                 # enviar a foto
+    "brandtemplate:meta:read",     # listar/identificar o template
+    "brandtemplate:content:read",  # ler os campos (dataset) do template
+    "design:content:write",        # criar o design via autofill
+    "design:content:read",         # exportar o design
 ]
 
 # Tempo maximo (segundos) esperando um job assincrono (upload/autofill/export).

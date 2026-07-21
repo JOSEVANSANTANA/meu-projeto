@@ -39,8 +39,8 @@ uso permitido no Pro.
    (guarde o secret com segurança — ele só aparece uma vez).
 4. Em **Scopes**, marque exatamente estes:
    - `asset:write`
-   - `brand_template:meta:read`
-   - `brand_template:content:read`
+   - `brandtemplate:meta:read`
+   - `brandtemplate:content:read`
    - `design:content:write`
    - `design:content:read`
 5. Em **Return URL / Redirect URIs**, adicione **exatamente**:
@@ -134,7 +134,17 @@ Duplo clique em **`autorizar.bat`** (ou `python autorizar.py`).
   o programa renova o acesso sozinho (o token de acesso dura 4h e é renovado
   automaticamente pelo refresh token).
 
-### 3.3 Uso diário
+### 3.3 Testar a conexão (recomendado antes do 1º uso)
+Duplo clique em **`testar.bat`** (ou `python testar_conexao.py`). Ele:
+- confere as credenciais e o token (renovando se preciso);
+- **conecta de verdade** ao Canva e lista os Brand Templates da sua conta;
+- valida cada `brand_template_id` do `templates.json` e checa se os nomes de
+  campo que você mapeou realmente existem no template.
+
+Se tudo aparecer com `[OK]`, a geração vai funcionar. É o teste de ponta a ponta
+que só pode rodar com as suas credenciais.
+
+### 3.4 Uso diário
 Duplo clique em **`gerar_banner.bat`**. O programa:
 1. Mostra o **menu de eventos/dias**.
 2. Pede **foto** (valida se o arquivo existe), **nome**, **data** e **horário**.
@@ -177,11 +187,13 @@ canva-stories/
 ├── canva_client.py         # Cliente da Canva API (OAuth, upload, autofill, export)
 ├── autorizar.py            # Autorizacao OAuth PKCE (rode 1 vez)
 ├── inspecionar_template.py # Descobre os nomes dos campos de um template
+├── testar_conexao.py       # Diagnostico: valida credenciais/token/templates
 ├── templates.json          # Mapeia cada evento -> template_id + campos
 ├── .env.example            # Modelo das credenciais (copie para .env)
 ├── requirements.txt        # Dependencia: requests
 ├── instalar.bat            # Duplo clique: instala dependencias
 ├── autorizar.bat           # Duplo clique: autoriza no Canva (1 vez)
+├── testar.bat              # Duplo clique: testa a conexao / diagnostico
 ├── gerar_banner.bat        # Duplo clique: gera banners (dia a dia)
 ├── fotos/                  # Fotos das pessoas
 └── saida/                  # Banners finais baixados
