@@ -80,13 +80,45 @@ class CallbackHandler(BaseHTTPRequestHandler):
         pass  # silencia o log do servidor
 
 
+def carregar_env():
+    """Le CANVA_CLIENT_ID/SECRET do ambiente OU do arquivo .env (mesma logica
+    dos outros scripts, para funcionar sem precisar do 'set' no CMD)."""
+    cid = os.environ.get("CANVA_CLIENT_ID")
+    cs = os.environ.get("CANVA_CLIENT_SECRET")
+    env_path = os.path.join(BASE_DIR, ".env")
+    if (not cid or not cs) and os.path.isfile(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            for linha in f:
+                linha = linha.strip()
+                if "=" in linha and not linha.startswith("#"):
+                    k, _, v = linha.partition("=")
+                    v = v.strip().strip('"').strip("'")
+                    if k.strip() == "CANVA_CLIENT_ID" and not cid:
+                        cid = v
+                    elif k.strip() == "CANVA_CLIENT_SECRET" and not cs:
+                        cs = v
+    return cid, cs
+
+
 def main():
-    client_id = os.environ.get("CANVA_CLIENT_ID")
-    client_secret = os.environ.get("CANVA_CLIENT_SECRET")
+    client_id, client_secret = carregar_env()
+
+    # Segredo ainda no valor de exemplo? Avisa de forma clara.
+    if client_secret and client_secret.startswith("COLE_AQUI"):
+        print(
+            "\n[ERRO] Voce ainda nao colou o Client Secret no arquivo .env.\n"
+            "       Abra o .env no Bloco de Notas e troque COLE_AQUI_O_NOVO_SEGREDO\n"
+            "       pelo segredo que voce gerou no portal do Canva. Depois rode de novo.\n"
+        )
+        sys.exit(1)
+
     if not client_id or not client_secret:
         print(
-            "\n[ERRO] Defina as credenciais antes de rodar.\n"
-            "       No CMD (mesma janela), rode:\n"
+            "\n[ERRO] Credenciais nao encontradas.\n"
+            "       Abra o arquivo .env (na mesma pasta) e preencha:\n"
+            "         CANVA_CLIENT_ID=...\n"
+            "         CANVA_CLIENT_SECRET=...\n"
+            "       Alternativa: no CMD, rode antes:\n"
             '         set CANVA_CLIENT_ID=seu_client_id\n'
             '         set CANVA_CLIENT_SECRET=seu_client_secret\n'
             "       (ou copie .env.example para .env e preencha)\n"
