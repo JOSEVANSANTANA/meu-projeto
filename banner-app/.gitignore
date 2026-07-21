@@ -1,0 +1,14 @@
+fotos/*
+!fotos/LEIA-ME.txt
+saida/*
+!saida/.gitkeep
+templates_bg/*.png
+templates_bg/*.jpg
+fontes/*.ttf
+__pycache__/
+*.pyc
+build/
+dist/
+*.spec
+venv/
+.venv/

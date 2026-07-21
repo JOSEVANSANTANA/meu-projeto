@@ -1,0 +1,5 @@
+# Dependencias do app de banners.
+Pillow>=10.0.0
+numpy>=1.24.0
+# Opcional (deteccao de rosto para melhorar a recomendacao de foto):
+# opencv-python>=4.8.0

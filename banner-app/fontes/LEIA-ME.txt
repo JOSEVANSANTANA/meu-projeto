@@ -1,0 +1,2 @@
+Coloque aqui a fonte Montserrat-Bold.ttf (gratis em fonts.google.com/specimen/Montserrat).
+Sem ela, o programa usa uma fonte padrao do Windows.

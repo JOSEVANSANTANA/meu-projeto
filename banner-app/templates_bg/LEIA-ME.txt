@@ -1,0 +1,6 @@
+Coloque aqui os fundos exportados do Canva, em PNG 1080x1920, SEM a foto e SEM
+os textos (deixe esses espacos vazios). Os nomes devem bater com o "fundo" de
+cada template no config/templates.json. Exemplos ja referenciados:
+  domingo.png
+  dupla.png
+Voce tambem pode importar um fundo direto pela janela "Gerenciar templates".

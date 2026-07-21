@@ -1,0 +1,132 @@
+{
+  "config_geral": {
+    "largura": 1080,
+    "altura": 1920,
+    "cor_fundo": "#111111",
+    "fonte_padrao": "fontes/Montserrat-Bold.ttf"
+  },
+  "templates": [
+    {
+      "id": "domingo",
+      "rotulo": "Culto de Domingo",
+      "fundo": "templates_bg/domingo.png",
+      "fotos": [
+        {
+          "x": 290,
+          "y": 560,
+          "largura": 500,
+          "altura": 500,
+          "formato": "circulo",
+          "raio_borda": 0
+        }
+      ],
+      "textos": [
+        {
+          "origem": "nome",
+          "x": 540,
+          "y": 1110,
+          "tamanho": 78,
+          "cor": "#FFFFFF",
+          "ancora": "centro",
+          "maiusculas": true,
+          "sombra": true,
+          "largura_max": 900,
+          "prefixo": ""
+        },
+        {
+          "origem": "data",
+          "x": 540,
+          "y": 1600,
+          "tamanho": 46,
+          "cor": "#FFD700",
+          "ancora": "centro",
+          "maiusculas": false,
+          "sombra": true,
+          "prefixo": ""
+        },
+        {
+          "origem": "horario",
+          "x": 540,
+          "y": 1670,
+          "tamanho": 46,
+          "cor": "#FFD700",
+          "ancora": "centro",
+          "maiusculas": false,
+          "sombra": true,
+          "prefixo": ""
+        }
+      ]
+    },
+    {
+      "id": "casal_dupla",
+      "rotulo": "Dupla (2 participantes)",
+      "fundo": "templates_bg/dupla.png",
+      "fotos": [
+        {
+          "x": 120,
+          "y": 620,
+          "largura": 380,
+          "altura": 380,
+          "formato": "circulo",
+          "raio_borda": 0
+        },
+        {
+          "x": 580,
+          "y": 620,
+          "largura": 380,
+          "altura": 380,
+          "formato": "circulo",
+          "raio_borda": 0
+        }
+      ],
+      "textos": [
+        {
+          "origem": "nome",
+          "x": 310,
+          "y": 1030,
+          "tamanho": 48,
+          "cor": "#FFFFFF",
+          "ancora": "centro",
+          "maiusculas": true,
+          "sombra": true,
+          "largura_max": 400,
+          "prefixo": ""
+        },
+        {
+          "origem": "nome",
+          "x": 770,
+          "y": 1030,
+          "tamanho": 48,
+          "cor": "#FFFFFF",
+          "ancora": "centro",
+          "maiusculas": true,
+          "sombra": true,
+          "largura_max": 400,
+          "prefixo": ""
+        },
+        {
+          "origem": "data",
+          "x": 540,
+          "y": 1600,
+          "tamanho": 46,
+          "cor": "#FFD700",
+          "ancora": "centro",
+          "maiusculas": false,
+          "sombra": true,
+          "prefixo": ""
+        },
+        {
+          "origem": "horario",
+          "x": 540,
+          "y": 1670,
+          "tamanho": 46,
+          "cor": "#FFD700",
+          "ancora": "centro",
+          "maiusculas": false,
+          "sombra": true,
+          "prefixo": ""
+        }
+      ]
+    }
+  ]
+}
