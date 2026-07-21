@@ -1,0 +1,2 @@
+# Dependencia unica: cliente HTTP para falar com a API do Canva.
+requests>=2.31.0

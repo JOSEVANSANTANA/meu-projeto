@@ -1,2 +1,0 @@
-Coloque aqui as fotos das pessoas (JPG ou PNG).
-Ao rodar o programa, informe o caminho, por exemplo:  fotos/joao.jpg

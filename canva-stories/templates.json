@@ -1,0 +1,73 @@
+{
+  "_ajuda": "Cada item de 'opcoes' e uma escolha do menu. 'brand_template_id' e o ID do template na sua conta Canva (pegue na URL do template: canva.com/design/XXXXXXXX/...). Em 'campos', a ESQUERDA e o dado do programa (nao mude) e a DIREITA e o NOME EXATO do campo/placeholder no seu template do Canva. Rode 'python inspecionar_template.py <brand_template_id>' para descobrir os nomes reais dos campos.",
+
+  "export": {
+    "formato": "jpg",
+    "largura": 1080,
+    "altura": 1920,
+    "qualidade": 90
+  },
+
+  "opcoes": [
+    {
+      "id": "segunda",
+      "rotulo": "Culto de Segunda",
+      "brand_template_id": "COLE_AQUI_O_ID_DO_TEMPLATE_SEGUNDA",
+      "campos": { "foto": "foto_pessoa", "nome": "nome", "data": "data_evento", "horario": "horario" }
+    },
+    {
+      "id": "terca",
+      "rotulo": "Culto de Terca",
+      "brand_template_id": "COLE_AQUI_O_ID_DO_TEMPLATE_TERCA",
+      "campos": { "foto": "foto_pessoa", "nome": "nome", "data": "data_evento", "horario": "horario" }
+    },
+    {
+      "id": "quarta",
+      "rotulo": "Culto de Quarta",
+      "brand_template_id": "COLE_AQUI_O_ID_DO_TEMPLATE_QUARTA",
+      "campos": { "foto": "foto_pessoa", "nome": "nome", "data": "data_evento", "horario": "horario" }
+    },
+    {
+      "id": "quinta",
+      "rotulo": "Culto de Quinta",
+      "brand_template_id": "COLE_AQUI_O_ID_DO_TEMPLATE_QUINTA",
+      "campos": { "foto": "foto_pessoa", "nome": "nome", "data": "data_evento", "horario": "horario" }
+    },
+    {
+      "id": "sexta",
+      "rotulo": "Culto de Sexta",
+      "brand_template_id": "COLE_AQUI_O_ID_DO_TEMPLATE_SEXTA",
+      "campos": { "foto": "foto_pessoa", "nome": "nome", "data": "data_evento", "horario": "horario" }
+    },
+    {
+      "id": "sabado",
+      "rotulo": "Culto de Sabado",
+      "brand_template_id": "COLE_AQUI_O_ID_DO_TEMPLATE_SABADO",
+      "campos": { "foto": "foto_pessoa", "nome": "nome", "data": "data_evento", "horario": "horario" }
+    },
+    {
+      "id": "domingo",
+      "rotulo": "Culto de Domingo",
+      "brand_template_id": "COLE_AQUI_O_ID_DO_TEMPLATE_DOMINGO",
+      "campos": { "foto": "foto_pessoa", "nome": "nome", "data": "data_evento", "horario": "horario" }
+    },
+    {
+      "id": "jovens",
+      "rotulo": "Culto de Jovens",
+      "brand_template_id": "COLE_AQUI_O_ID_DO_TEMPLATE_JOVENS",
+      "campos": { "foto": "foto_pessoa", "nome": "nome", "data": "data_evento", "horario": "horario" }
+    },
+    {
+      "id": "santa_ceia",
+      "rotulo": "Santa Ceia",
+      "brand_template_id": "COLE_AQUI_O_ID_DO_TEMPLATE_SANTA_CEIA",
+      "campos": { "foto": "foto_pessoa", "nome": "nome", "data": "data_evento", "horario": "horario" }
+    },
+    {
+      "id": "lideranca",
+      "rotulo": "Reuniao de Lideranca",
+      "brand_template_id": "COLE_AQUI_O_ID_DO_TEMPLATE_LIDERANCA",
+      "campos": { "foto": "foto_pessoa", "nome": "nome", "data": "data_evento", "horario": "horario" }
+    }
+  ]
+}

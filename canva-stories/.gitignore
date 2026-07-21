@@ -1,0 +1,13 @@
+# Segredos e tokens (NUNCA versionar)
+.env
+.canva_token.json
+# Fotos e banners gerados
+fotos/*
+!fotos/LEIA-ME.txt
+saida/*
+!saida/.gitkeep
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
