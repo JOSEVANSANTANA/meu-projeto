@@ -59,6 +59,7 @@ pub fn is_high_impact_headline(headline: &str) -> bool {
         // Fed / juros
         "fomc", "fed ", "federal reserve", "powell", "rate decision",
         "interest rate", "rate cut", "rate hike", "fed funds", "dot plot",
+        "fomc minutes", "beige book", "discount rate",
         // Atividade / macro
         "gdp", "gross domestic product", "retail sales", "ism", "pmi",
         "consumer confidence", "recession",

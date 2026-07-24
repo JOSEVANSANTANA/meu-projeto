@@ -9,12 +9,18 @@ use anyhow::Result;
 /// o HTML do Investing.com/FinancialJuice, que o Cloudflare bloqueia).
 ///
 /// Fontes padrão (todas gratuitas, macro, de alta credibilidade):
-///   - Federal Reserve  -> decisões do FOMC, juros, discursos (oficial)
-///   - MarketWatch      -> manchetes de mercado em tempo real (inclui CPI/NFP)
-///   - CNBC (Economia)  -> cobertura macro dos EUA
+///   - Federal Reserve       -> decisões do FOMC, juros, discursos (oficial)
+///   - MarketWatch           -> manchetes de mercado em tempo real (inclui CPI/NFP)
+///   - CNBC (Economia)       -> cobertura macro dos EUA
+///   - Bloomberg             -> mercados e política (feed público direto)
+///   - The Wall Street Journal -> mercados e mundo (feed público direto)
+///   - Financial Times       -> homepage internacional (feed público direto)
+///   - Reuters               -> a Reuters descontinuou o RSS público em 2020;
+///     cobrimos via busca do Google News restrita a site:reuters.com, que
+///     devolve as manchetes reais da Reuters com atribuição preservada.
 ///
 /// (O feed do BLS foi removido dos padrões: bls.gov retorna 403 a este
-/// cliente. CPI e Payroll ainda chegam pela cobertura de MarketWatch/CNBC.)
+/// cliente. CPI e Payroll ainda chegam pela cobertura de MarketWatch/CNBC/WSJ.)
 ///
 /// Você pode acrescentar/trocar feeds via variável RSS_FEEDS no .env
 /// (formato: "Nome|url,Nome|url").
@@ -24,6 +30,9 @@ fn default_feeds() -> Vec<(String, String)> {
     // antes de ir ao Gemini, então feeds mais "largos" não poluem o painel.
     let cnbc = |id: &str| {
         format!("https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id={id}")
+    };
+    let google_news = |query: &str| {
+        format!("https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en")
     };
     vec![
         (
@@ -45,6 +54,30 @@ fn default_feeds() -> Vec<(String, String)> {
         (
             "Yahoo Finance".into(),
             "https://finance.yahoo.com/news/rssindex".into(),
+        ),
+        (
+            "Bloomberg Markets".into(),
+            "https://feeds.bloomberg.com/markets/news.rss".into(),
+        ),
+        (
+            "Bloomberg Politics".into(),
+            "https://feeds.bloomberg.com/politics/news.rss".into(),
+        ),
+        (
+            "WSJ Markets".into(),
+            "https://feeds.a.dj.com/rss/RSSMarketsMain.xml".into(),
+        ),
+        (
+            "WSJ World News".into(),
+            "https://feeds.a.dj.com/rss/RSSWorldNews.xml".into(),
+        ),
+        (
+            "Financial Times".into(),
+            "https://www.ft.com/rss/home".into(),
+        ),
+        (
+            "Reuters".into(),
+            google_news("site:reuters.com+(economy+OR+markets+OR+fed+OR+trump+OR+tariff)+when:2d"),
         ),
     ]
 }
@@ -94,10 +127,19 @@ pub async fn fetch_all(extra: &[String]) -> Result<Vec<RawNewsItem>> {
     Ok(items)
 }
 
+/// Caminhos de feed comuns entre os principais CMS/sites de notícia — testados
+/// como fallback quando a página não expõe `<link rel="alternate">` (muitos
+/// sites JS-pesados omitem essa tag mesmo tendo um feed no ar).
+const COMMON_FEED_PATHS: &[&str] = &[
+    "/feed", "/feed/", "/rss", "/rss/", "/rss.xml", "/feed.xml", "/atom.xml",
+    "/index.xml", "/feeds/all.xml", "/rss/all.xml", "/feed/rss",
+];
+
 /// Valida uma URL adicionada pelo usuário: tenta parsear como RSS/Atom e, se
 /// for uma página HTML, AUTODESCOBRE o link do feed (`<link rel="alternate"
-/// type="application/rss+xml" href="...">`). Retorna (url_final_do_feed,
-/// nº de itens crus encontrados). Erro se não achar um feed.
+/// type="application/rss+xml" href="...">`); se ainda assim não achar, tenta
+/// caminhos de feed comuns (`/feed`, `/rss.xml`, ...) no mesmo host. Retorna
+/// (url_final_do_feed, nº de itens crus encontrados). Erro se não achar feed.
 pub(crate) async fn probe_feed(url: &str) -> Result<(String, usize)> {
     let client = browser_client()?;
     let body = client.get(url).send().await?.error_for_status()?.text().await?;
@@ -108,21 +150,45 @@ pub(crate) async fn probe_feed(url: &str) -> Result<(String, usize)> {
     }
 
     if let Some(feed_url) = discover_feed_link(&body, url) {
-        let body2 = client
-            .get(&feed_url)
-            .send()
-            .await?
-            .error_for_status()?
-            .text()
-            .await?;
-        let titles2 = extract_titles(&body2);
-        if !titles2.is_empty() {
-            return Ok((feed_url, titles2.len()));
+        if let Some(n) = try_feed_url(&client, &feed_url).await {
+            return Ok((feed_url, n));
         }
     }
+
+    // Fallback: sites JS-pesados (SPAs) muitas vezes não anunciam o feed no
+    // HTML mesmo tendo um. Tenta os caminhos mais comuns no mesmo host.
+    let base = base_origin(url);
+    for path in COMMON_FEED_PATHS {
+        let candidate = format!("{base}{path}");
+        if let Some(n) = try_feed_url(&client, &candidate).await {
+            return Ok((candidate, n));
+        }
+    }
+
     Err(anyhow::anyhow!(
-        "nenhum feed RSS/Atom encontrado nessa URL — tente colar a URL direta do feed"
+        "nenhum feed RSS/Atom encontrado nessa URL, nem nos caminhos comuns \
+         (/feed, /rss.xml, ...). Esse site provavelmente não expõe RSS público \
+         — tente colar a URL direta do feed, se você a tiver."
     ))
+}
+
+/// Busca uma URL candidata e retorna Some(nº de itens) se for um feed válido.
+async fn try_feed_url(client: &reqwest::Client, url: &str) -> Option<usize> {
+    let resp = client.get(url).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body = resp.text().await.ok()?;
+    let titles = extract_titles(&body);
+    (!titles.is_empty()).then_some(titles.len())
+}
+
+/// Extrai "esquema://host" de uma URL (sem path).
+fn base_origin(url: &str) -> String {
+    let scheme = url.split("://").next().unwrap_or("https");
+    let after = url.split("://").nth(1).unwrap_or(url);
+    let host = after.split('/').next().unwrap_or(after);
+    format!("{scheme}://{host}")
 }
 
 /// Procura no HTML o link de feed RSS/Atom declarado em <link rel="alternate">.
@@ -193,6 +259,23 @@ pub(crate) async fn fetch_titles(url: &str) -> Result<Vec<String>> {
     Ok(extract_titles(&xml))
 }
 
+/// Como `fetch_titles`, mas para feeds onde o <title> pode faltar (reposts do
+/// Truth Social sem legenda vêm como "[No Title] - Post from ..."): nesse
+/// caso usa o <description> (HTML removido) como texto do item. Usado pelo
+/// conector do Truth Social — sem isso, ~40% dos posts reais eram descartados.
+pub(crate) async fn fetch_best_text(url: &str) -> Result<Vec<String>> {
+    polite_delay().await;
+    let client = browser_client()?;
+    let xml = client
+        .get(url)
+        .send()
+        .await?
+        .error_for_status()?
+        .text()
+        .await?;
+    Ok(extract_best_text(&xml))
+}
+
 async fn fetch_one(source: &str, url: &str) -> Result<Vec<RawNewsItem>> {
     let now = chrono::Utc::now().to_rfc3339();
     let items = fetch_titles(url)
@@ -229,6 +312,47 @@ fn extract_titles(xml: &str) -> Vec<String> {
         }
     }
     titles
+}
+
+/// Como `extract_titles`, mas quando o <title> de um item está vazio ou é o
+/// placeholder padrão de agregadores para post sem legenda (começa com
+/// "[No Title]"), usa o <description> (com tags HTML removidas) no lugar.
+/// Ignora o item só se AMBOS title e description vierem vazios.
+fn extract_best_text(xml: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for (open, close) in [("<item", "</item>"), ("<entry", "</entry>")] {
+        for chunk in xml.split(open).skip(1) {
+            let block = chunk.split(close).next().unwrap_or(chunk);
+            let title = extract_tag(block, "title").unwrap_or_default();
+            let use_title = !title.is_empty() && !title.starts_with("[No Title]");
+            let text = if use_title {
+                title
+            } else {
+                extract_tag(block, "description")
+                    .map(|d| strip_html_tags(&d))
+                    .unwrap_or_default()
+            };
+            if !text.trim().is_empty() {
+                out.push(text);
+            }
+        }
+    }
+    out
+}
+
+/// Remove marcações HTML (<p>, <span>, <br/>, ...) preservando o texto.
+fn strip_html_tags(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut in_tag = false;
+    for c in s.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    clean_text(&out)
 }
 
 /// Extrai o conteúdo textual da primeira ocorrência de <tag>…</tag>,
@@ -300,5 +424,65 @@ mod tests {
     fn extrai_atributo() {
         let tag = r#"link rel="alternate" type="application/rss+xml" href='/feed'"#;
         assert_eq!(extract_attr(tag, "href"), Some("/feed".to_string()));
+    }
+
+    #[test]
+    fn strip_html_remove_tags_preserva_texto() {
+        assert_eq!(
+            strip_html_tags("<p>Ol\u{e1} <span>mundo</span> &amp; cia</p>"),
+            "Olá mundo & cia"
+        );
+        assert_eq!(strip_html_tags("<br/>sem tags externas"), "sem tags externas");
+    }
+
+    #[test]
+    fn extract_best_text_usa_description_quando_sem_titulo() {
+        // Caso real do Trump mirror: repost sem legenda -> "[No Title]...".
+        let xml = r#"<rss><channel>
+            <item>
+                <title><![CDATA[[No Title] - Post from July 24, 2026]]></title>
+                <description><![CDATA[<p><span class="quote-inline">RT: algo importante sobre tarifas</span></p>]]></description>
+            </item>
+            <item>
+                <title><![CDATA[Texto completo do post original sobre o Fed]]></title>
+                <description><![CDATA[<p>Texto completo do post original sobre o Fed</p>]]></description>
+            </item>
+            <item>
+                <title></title>
+                <description></description>
+            </item>
+        </channel></rss>"#;
+        let out = extract_best_text(xml);
+        assert_eq!(out.len(), 2, "item totalmente vazio deve ser descartado");
+        assert_eq!(out[0], "RT: algo importante sobre tarifas");
+        assert_eq!(out[1], "Texto completo do post original sobre o Fed");
+    }
+
+    #[test]
+    fn base_origin_extrai_esquema_e_host() {
+        assert_eq!(base_origin("https://exemplo.com/pagina?x=1"), "https://exemplo.com");
+        assert_eq!(base_origin("http://a.b.com"), "http://a.b.com");
+    }
+}
+
+#[cfg(test)]
+mod network_verification {
+    // Teste manual de rede (não faz parte da suíte padrão — depende de
+    // internet). Confirma que a URL do Google News (com "(", "+", sem
+    // encoding manual) funciona através do browser_client() REAL do projeto,
+    // não só via curl. Rode com:
+    //   cargo test --lib network_verification -- --ignored --nocapture
+    use super::*;
+
+    #[tokio::test]
+    #[ignore]
+    async fn google_news_url_funciona_via_reqwest_real() {
+        let url = "https://news.google.com/rss/search?q=site:reuters.com+(economy+OR+markets+OR+fed+OR+trump+OR+tariff)+when:2d&hl=en-US&gl=US&ceid=US:en";
+        let titles = fetch_titles(url).await.expect("fetch_titles via reqwest real deve funcionar");
+        println!("OK: {} titulos extraidos via reqwest real", titles.len());
+        for t in titles.iter().take(3) {
+            println!("  -> {t}");
+        }
+        assert!(titles.len() > 5, "esperava vários títulos, veio {}", titles.len());
     }
 }

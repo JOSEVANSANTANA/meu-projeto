@@ -4,6 +4,7 @@ import { NewsCard } from "./components/NewsCard";
 import { StatusBar } from "./components/StatusBar";
 import { ControlBar } from "./components/ControlBar";
 import { SeverityFilter } from "./components/SeverityFilter";
+import { SourceFilter } from "./components/SourceFilter";
 import { PriceLevels } from "./components/PriceLevels";
 import { SentimentPies } from "./components/SentimentPies";
 import { Scoreboard } from "./components/Scoreboard";
@@ -20,6 +21,7 @@ import type { RuntimeStatus, SeverityFilter as Filter } from "./types";
 export default function App() {
   const { events, status, lastError } = useNewsStream();
   const [filter, setFilter] = useState<Filter>("ALL");
+  const [hiddenSources, setHiddenSources] = useState<Set<string>>(new Set());
   const [price, setPrice] = useState("");
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
 
@@ -58,13 +60,11 @@ export default function App() {
     return c;
   }, [assetEvents]);
 
-  const visible = useMemo(
-    () =>
-      filter === "ALL"
-        ? assetEvents
-        : assetEvents.filter((e) => e.impact_level === filter),
-    [assetEvents, filter],
-  );
+  const visible = useMemo(() => {
+    let v = filter === "ALL" ? assetEvents : assetEvents.filter((e) => e.impact_level === filter);
+    if (hiddenSources.size > 0) v = v.filter((e) => !hiddenSources.has(e.source));
+    return v;
+  }, [assetEvents, filter, hiddenSources]);
 
   return (
     <div className="flex h-screen flex-col bg-terminal-bg font-mono text-gray-200">
@@ -89,11 +89,13 @@ export default function App() {
       {/* Placar de acerto da IA (autoaprendizagem) */}
       <Scoreboard />
 
-      {/* Filtro por severidade + fontes */}
+      {/* Filtro por severidade + por canal/fonte */}
       <div className="flex flex-wrap items-center gap-3 border-b border-terminal-border px-4 py-1.5">
         <SeverityFilter active={filter} counts={counts} onChange={setFilter} />
+        <SourceFilter events={assetEvents} hidden={hiddenSources} onChange={setHiddenSources} />
         <span className="ml-auto text-[10px] text-terminal-dim">
-          FED · MARKETWATCH · CNBC · YAHOO FINANCE · TRUTH SOCIAL
+          FED · MARKETWATCH · CNBC · BLOOMBERG · WSJ · FT · REUTERS · YAHOO
+          FINANCE · TRUTH SOCIAL
         </span>
       </div>
 
@@ -103,19 +105,19 @@ export default function App() {
         </div>
       )}
 
-      {/* Feed ao vivo (filtrado por ativo + severidade) */}
+      {/* Feed ao vivo (filtrado por ativo + severidade + fonte) */}
       <main className="flex-1 space-y-2 overflow-y-auto p-3">
         {visible.length === 0 ? (
           <div className="mt-24 text-center text-terminal-dim">
             <p className="text-lg">
               {assetEvents.length === 0
                 ? `AGUARDANDO ANÁLISES PARA ${asset}…`
-                : `NENHUM EVENTO "${filter}" NO MOMENTO`}
+                : "NENHUM EVENTO COM OS FILTROS ATUAIS"}
             </p>
             <p className="mt-2 text-xs">
               {assetEvents.length === 0
                 ? "Ao trocar de ativo, as notícias são re-analisadas sob a ótica dele — os cards aparecem em alguns ciclos."
-                : "Ajuste o filtro de severidade acima."}
+                : "Ajuste o filtro de severidade e/ou de fonte acima."}
             </p>
           </div>
         ) : (

@@ -1,4 +1,6 @@
+import { useState } from "react";
 import type { NewsEvent } from "../types";
+import { copyToClipboard } from "../lib/clipboard";
 
 const SENTIMENT_STYLES: Record<NewsEvent["sentiment"], string> = {
   BULLISH: "border-l-terminal-green text-terminal-green",
@@ -28,16 +30,42 @@ function tickerOf(asset: string): string {
   return asset.split(/\s+/)[0].slice(0, 6).toUpperCase();
 }
 
+/** Formata a notícia + análise completa como texto simples para copiar. */
+function formatForCopy(ev: NewsEvent): string {
+  const { up, down } = ev.sp500_direction_probability;
+  const lines = [
+    `[${ev.source}] ${fmtTime(ev.received_at_utc)} — ${ev.impact_level}`,
+    ev.event,
+  ];
+  if (ev.actual !== "N/A" || ev.forecast !== "N/A") {
+    lines.push(`Atual: ${ev.actual} | Projeção: ${ev.forecast} | Anterior: ${ev.previous}`);
+  }
+  lines.push(
+    `Ativo: ${tickerOf(ev.asset)} | Sentimento: ${ev.sentiment} | Prob. ↑${up}% ↓${down}% | Alvo: ${ev.projected_target_pts}`,
+    `Análise: ${ev.rationale}`,
+  );
+  return lines.join("\n");
+}
+
 export function NewsCard({ ev }: { ev: NewsEvent }) {
   const sentiment = SENTIMENT_STYLES[ev.sentiment] ?? SENTIMENT_STYLES.NEUTRAL;
   const badge = IMPACT_BADGE[ev.impact_level] ?? IMPACT_BADGE.LOW;
   const { up, down } = ev.sp500_direction_probability;
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    const ok = await copyToClipboard(formatForCopy(ev));
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    }
+  };
 
   return (
     <article
       className={`border border-terminal-border border-l-4 ${sentiment} bg-terminal-panel px-4 py-3 text-sm`}
     >
-      {/* Linha 1: horário / fonte / impacto / tipo de alerta */}
+      {/* Linha 1: horário / fonte / impacto / tipo de alerta / copiar */}
       <header className="flex items-center gap-3 text-xs text-terminal-dim">
         <span>{fmtTime(ev.received_at_utc)}</span>
         <span className="text-terminal-amber">[{ev.source}]</span>
@@ -45,6 +73,17 @@ export function NewsCard({ ev }: { ev: NewsEvent }) {
           {ev.impact_level}
         </span>
         <span className="ml-auto">{ev.alert_type}</span>
+        <button
+          onClick={handleCopy}
+          title="Copiar notícia e análise"
+          className={`rounded-sm border px-1.5 py-0.5 transition-colors ${
+            copied
+              ? "border-terminal-green text-terminal-green"
+              : "border-terminal-border text-terminal-dim hover:border-terminal-amber hover:text-terminal-amber"
+          }`}
+        >
+          {copied ? "✓ COPIADO" : "⧉ COPIAR"}
+        </button>
       </header>
 
       {/* Linha 2: manchete colorida pelo sentimento */}

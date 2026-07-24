@@ -45,11 +45,14 @@ async fn fetch_trump_mirror() -> Result<Vec<RawNewsItem>> {
         .unwrap_or(true);
 
     let now = chrono::Utc::now().to_rfc3339();
-    let items = rss::fetch_titles(&mirror_url())
+    // fetch_best_text (não fetch_titles): ~40% dos posts do Trump são reposts
+    // sem legenda própria, cujo <title> vem como "[No Title] - Post from ...".
+    // Sem o fallback para <description>, esses posts eram todos descartados.
+    let items = rss::fetch_best_text(&mirror_url())
         .await?
         .into_iter()
         .filter(|h| !h.is_empty() && (!filter_on || is_market_relevant_post(h)))
-        .take(10)
+        .take(20)
         .map(|headline| RawNewsItem {
             source: "Truth Social (Trump)".to_string(),
             headline,
