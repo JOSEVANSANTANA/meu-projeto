@@ -1,3 +1,4 @@
+pub mod economic_calendar;
 pub mod investing;
 pub mod rss;
 pub mod truth_social;

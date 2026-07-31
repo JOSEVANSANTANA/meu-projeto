@@ -44,26 +44,39 @@ async fn fetch_trump_mirror() -> Result<Vec<RawNewsItem>> {
         .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
         .unwrap_or(true);
 
-    let now = chrono::Utc::now().to_rfc3339();
-    // fetch_best_text (não fetch_titles): ~40% dos posts do Trump são reposts
-    // sem legenda própria, cujo <title> vem como "[No Title] - Post from ...".
-    // Sem o fallback para <description>, esses posts eram todos descartados.
-    let items = rss::fetch_best_text(&mirror_url())
+    let now = chrono::Utc::now();
+    let mut stale = 0usize;
+    // fetch_best_text_with_dates (não fetch_titles): ~40% dos posts do Trump
+    // são reposts sem legenda própria, cujo <title> vem como "[No Title] -
+    // Post from ...". Sem o fallback para <description>, esses posts eram
+    // todos descartados. A data REAL de cada post evita que reposts antigos
+    // (o mirror reindexa) sejam tratados como "agora" — ver is_fresh_enough.
+    let items = rss::fetch_best_text_with_dates(&mirror_url())
         .await?
         .into_iter()
-        .filter(|h| !h.is_empty() && (!filter_on || is_market_relevant_post(h)))
+        .filter(|(h, _)| !h.is_empty() && (!filter_on || is_market_relevant_post(h)))
+        .filter(|(_, published)| {
+            let fresh = rss::is_fresh_enough(*published, now);
+            if !fresh {
+                stale += 1;
+            }
+            fresh
+        })
         .take(20)
-        .map(|headline| RawNewsItem {
+        .map(|(headline, published)| RawNewsItem {
             source: "Truth Social (Trump)".to_string(),
             headline,
             actual: None,
             forecast: None,
             previous: None,
             impact_hint: "headline".to_string(),
-            timestamp_utc: now.clone(),
+            timestamp_utc: published.unwrap_or(now).to_rfc3339(),
         })
         .collect::<Vec<_>>();
 
+    if stale > 0 {
+        log::info!("Truth Social (Trump): {stale} post(s) descartado(s) por estarem fora da janela de atualidade");
+    }
     log::info!("Truth Social (Trump): {} post(s) de interesse", items.len());
     Ok(items)
 }

@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_notification::NotificationExt;
 
 /// Após esta quantidade de falhas seguidas, um item é abandonado na sessão
 /// para não gerar tempestade de retry/consumo de cota a cada ciclo.
@@ -102,6 +101,14 @@ pub async fn run_loop(app: AppHandle, gemini: Arc<GeminiClient>) {
         match scrapers::truth_social::fetch_all().await {
             Ok(mut v) => batch.append(&mut v),
             Err(e) => log::warn!("Truth Social falhou neste ciclo: {e:#}"),
+        }
+
+        // Calendário econômico (CPI, NFP, decisões de juros, etc.) — aviso
+        // prévio de alto/médio impacto pouco antes da divulgação, com
+        // forecast/previous reais (nunca inventa o "actual").
+        match scrapers::economic_calendar::fetch_upcoming_events().await {
+            Ok(mut v) => batch.append(&mut v),
+            Err(e) => log::warn!("Calendário econômico falhou neste ciclo: {e:#}"),
         }
 
         // Investing.com fica atrás do Cloudflare e retorna 403 a scrapers
@@ -242,10 +249,28 @@ async fn analyze_and_store(
     true
 }
 
+/// Dispara a notificação nativa do SO e traz a janela para frente quando o
+/// usuário CLICA nela.
+///
+/// Não usamos `tauri-plugin-notification` aqui: no desktop (Windows/macOS/
+/// Linux) esse plugin mostra a notificação via `notify_rust::Notification`
+/// mas descarta o handle retornado (`let _ = notification.show();`, sem
+/// `wait_for_action`/`wait_for_response`) — o evento `actionPerformed` que o
+/// JS escuta só é emitido no código mobile (iOS/Android) da própria crate,
+/// nunca no desktop. Ou seja: clicar na notificação nunca tinha como
+/// funcionar, em nenhuma plataforma desktop, com esse plugin.
+///
+/// Chamamos `notify-rust` diretamente (mesma crate por baixo do plugin, já
+/// testada e funcionando neste projeto) para termos acesso ao
+/// `NotificationHandle` real: `.show()` + `wait_for_response()` roda numa
+/// thread dedicada (a chamada é bloqueante) e nos diz se o usuário clicou no
+/// corpo da notificação (`NotificationResponse::Default`) — diferente de um
+/// simples fechar/expirar, que não deve trazer a janela para frente.
+#[cfg(desktop)]
 fn fire_native_alert(app: &AppHandle, a: &crate::models::GeminiAnalysis) {
     let title = format!("⚠ {} — {}", a.impact_level, a.event);
     let body = format!(
-        "{} | ES: {} (↑{}% ↓{}%)\n{}",
+        "{} | {} (↑{}% ↓{}%)\n{}",
         a.sentiment,
         a.projected_target_pts,
         a.sp500_direction_probability.up,
@@ -255,16 +280,39 @@ fn fire_native_alert(app: &AppHandle, a: &crate::models::GeminiAnalysis) {
 
     // O som do alerta é disparado pelo frontend (Web Audio) ao receber o
     // evento "news-event" com impact_level CRITICAL/HIGH — ver useNewsStream.ts.
-    if let Err(e) = app
-        .notification()
-        .builder()
-        .title(title)
-        .body(body)
-        .show()
-    {
-        log::error!("Falha ao exibir notificação nativa: {e:#}");
-    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let notification = notify_rust::Notification::new()
+            .appname("ESF News Monitor")
+            .summary(&title)
+            .body(&body)
+            .finalize();
+
+        match notification.show() {
+            Ok(handle) => {
+                let result = handle.wait_for_response(move |response: &notify_rust::NotificationResponse| {
+                    if response.is_default_action() {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.unminimize();
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                });
+                if let Err(e) = result {
+                    log::warn!("Falha ao aguardar resposta da notificação: {e:#}");
+                }
+            }
+            Err(e) => log::error!("Falha ao exibir notificação nativa: {e:#}"),
+        }
+    });
 }
+
+/// No mobile (iOS/Android — plano em standby), notificações nativas exigem um
+/// mecanismo bem diferente (UNUserNotificationCenter/push, não notify-rust,
+/// que é desktop-only). Fica como no-op por enquanto.
+#[cfg(not(desktop))]
+fn fire_native_alert(_app: &AppHandle, _a: &crate::models::GeminiAnalysis) {}
 
 // ---------------------------------------------------------------------------
 // Autoaprendizagem: preço real, pontuação das predições e aprendizado

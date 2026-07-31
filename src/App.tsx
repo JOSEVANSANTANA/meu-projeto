@@ -10,7 +10,6 @@ import { SentimentPies } from "./components/SentimentPies";
 import { Scoreboard } from "./components/Scoreboard";
 import { FeedManager } from "./components/FeedManager";
 import { useNewsStream } from "./hooks/useNewsStream";
-import { registerNotificationClickFocus } from "./lib/nativeAlerts";
 import type { RuntimeStatus, SeverityFilter as Filter } from "./types";
 
 /**
@@ -33,10 +32,8 @@ export default function App() {
 
   useEffect(() => {
     refreshRuntime();
-    // Clicar na notificação nativa traz o app para frente.
-    let unlisten: (() => void) | undefined;
-    registerNotificationClickFocus().then((fn) => (unlisten = fn));
-    return () => unlisten?.();
+    // O clique na notificação nativa é tratado inteiramente no backend Rust
+    // (fire_native_alert em engine.rs) — não há mais nada a registrar aqui.
   }, []);
 
   const asset = runtime?.asset ?? "S&P 500 Futuro (ES)";

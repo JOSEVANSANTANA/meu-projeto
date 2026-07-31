@@ -159,8 +159,10 @@ pub fn run() {
     }
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
+    // Notificações são disparadas via notify-rust DIRETAMENTE em engine.rs (não
+    // via plugin) — ver o comentário em fire_native_alert() para o motivo.
     #[allow(unused_mut)]
-    let mut builder = tauri::Builder::default().plugin(tauri_plugin_notification::init());
+    let mut builder = tauri::Builder::default();
     // Auto-update é só desktop (no iOS a atualização vem pela App Store).
     #[cfg(desktop)]
     {

@@ -1,6 +1,7 @@
 use crate::models::RawNewsItem;
 use crate::scrapers::{browser_client, is_high_impact_headline, polite_delay};
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 
 /// Ingestão por RSS — a via ROBUSTA de coleta.
 ///
@@ -243,27 +244,10 @@ fn resolve_url(href: &str, base: &str) -> String {
     }
 }
 
-/// Busca e parseia um feed RSS/Atom, devolvendo os títulos crus (sem filtro).
-/// Reutilizado por outros conectores (ex.: Truth Social) que aplicam o próprio
-/// critério de relevância.
-pub(crate) async fn fetch_titles(url: &str) -> Result<Vec<String>> {
-    polite_delay().await; // anti-bot: 2–5s aleatórios antes de cada request
-    let client = browser_client()?;
-    let xml = client
-        .get(url)
-        .send()
-        .await?
-        .error_for_status()?
-        .text()
-        .await?;
-    Ok(extract_titles(&xml))
-}
-
-/// Como `fetch_titles`, mas para feeds onde o <title> pode faltar (reposts do
-/// Truth Social sem legenda vêm como "[No Title] - Post from ..."): nesse
-/// caso usa o <description> (HTML removido) como texto do item. Usado pelo
-/// conector do Truth Social — sem isso, ~40% dos posts reais eram descartados.
-pub(crate) async fn fetch_best_text(url: &str) -> Result<Vec<String>> {
+/// Busca e parseia um feed RSS/Atom, devolvendo cada item com sua data REAL
+/// de publicação (ver `extract_item_date`). Usado pelo pipeline de ingestão
+/// para não carimbar "agora" numa notícia que na verdade é antiga.
+pub(crate) async fn fetch_titles_with_dates(url: &str) -> Result<Vec<(String, Option<DateTime<Utc>>)>> {
     polite_delay().await;
     let client = browser_client()?;
     let xml = client
@@ -273,27 +257,81 @@ pub(crate) async fn fetch_best_text(url: &str) -> Result<Vec<String>> {
         .error_for_status()?
         .text()
         .await?;
-    Ok(extract_best_text(&xml))
+    Ok(extract_titles_with_dates(&xml))
+}
+
+/// Como `fetch_best_text`, mas com a data real de publicação — ver
+/// `fetch_titles_with_dates`.
+pub(crate) async fn fetch_best_text_with_dates(url: &str) -> Result<Vec<(String, Option<DateTime<Utc>>)>> {
+    polite_delay().await;
+    let client = browser_client()?;
+    let xml = client
+        .get(url)
+        .send()
+        .await?
+        .error_for_status()?
+        .text()
+        .await?;
+    Ok(extract_best_text_with_dates(&xml))
+}
+
+/// Idade máxima que uma notícia pode ter para ser tratada como "em tempo
+/// real" pelo motor. Acima disso é descartada — sem isso, feeds que
+/// resurfaceiam itens antigos (ex.: Google News com janela de "when:1d/2d",
+/// ou um feed com cache defasado) fariam o app exibir notícias de dias atrás
+/// como se fossem novas. Configurável via .env; padrão 24h.
+fn max_news_age() -> chrono::Duration {
+    let hours: i64 = std::env::var("MAX_NEWS_AGE_HOURS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(24);
+    chrono::Duration::hours(hours.max(1))
+}
+
+/// True se a notícia deve ser aceita: sem data conhecida (não dá pra provar
+/// que é velha, deixa passar) OU dentro da janela de "tempo real" configurada.
+pub(crate) fn is_fresh_enough(published: Option<DateTime<Utc>>, now: DateTime<Utc>) -> bool {
+    match published {
+        None => true,
+        Some(dt) => now.signed_duration_since(dt) <= max_news_age(),
+    }
 }
 
 async fn fetch_one(source: &str, url: &str) -> Result<Vec<RawNewsItem>> {
-    let now = chrono::Utc::now().to_rfc3339();
-    let items = fetch_titles(url)
+    let now = chrono::Utc::now();
+    let mut stale = 0usize;
+    let items = fetch_titles_with_dates(url)
         .await?
         .into_iter()
-        .filter(|h| !h.is_empty() && is_high_impact_headline(h))
+        .filter(|(h, _)| !h.is_empty() && is_high_impact_headline(h))
+        .filter(|(_, published)| {
+            let fresh = is_fresh_enough(*published, now);
+            if !fresh {
+                stale += 1;
+            }
+            fresh
+        })
         .take(10)
-        .map(|headline| RawNewsItem {
+        .map(|(headline, published)| RawNewsItem {
             source: source.to_string(),
             headline,
             actual: None,
             forecast: None,
             previous: None,
             impact_hint: "headline".to_string(),
-            timestamp_utc: now.clone(),
+            // Usa a data REAL de publicação do item; só recorre a "agora"
+            // quando o feed não informa nenhuma data (ver is_fresh_enough).
+            timestamp_utc: published.unwrap_or(now).to_rfc3339(),
         })
         .collect::<Vec<_>>();
 
+    if stale > 0 {
+        log::info!(
+            "RSS '{source}': {stale} item(ns) descartado(s) por estar(em) fora \
+             da janela de atualidade (> {}h)",
+            std::env::var("MAX_NEWS_AGE_HOURS").unwrap_or_else(|_| "24".to_string())
+        );
+    }
     log::info!("RSS '{source}': {} manchete(s) de interesse", items.len());
     Ok(items)
 }
@@ -301,24 +339,62 @@ async fn fetch_one(source: &str, url: &str) -> Result<Vec<RawNewsItem>> {
 /// Parser RSS/Atom minimalista (evita dependência extra de crate):
 /// extrai o <title> de cada <item> (RSS) ou <entry> (Atom).
 fn extract_titles(xml: &str) -> Vec<String> {
-    let mut titles = Vec::new();
+    extract_titles_with_dates(xml).into_iter().map(|(t, _)| t).collect()
+}
+
+/// Como `extract_titles`, mas também extrai a data REAL de publicação de cada
+/// item (<pubDate> no RSS 2.0; <published>/<updated> no Atom), para que o
+/// pipeline de ingestão saiba a idade verdadeira da notícia — nunca carimbe
+/// "agora" para algo que na verdade é de dias atrás (ver MAX_NEWS_AGE_HOURS
+/// em fetch_one/fetch_trump_mirror). None quando o item não traz nenhuma
+/// dessas tags ou a data não pôde ser parseada.
+fn extract_titles_with_dates(xml: &str) -> Vec<(String, Option<DateTime<Utc>>)> {
+    let mut out = Vec::new();
     // RSS usa <item>…</item>; Atom usa <entry>…</entry>. Tratamos os dois.
     for (open, close) in [("<item", "</item>"), ("<entry", "</entry>")] {
         for chunk in xml.split(open).skip(1) {
             let block = chunk.split(close).next().unwrap_or(chunk);
             if let Some(title) = extract_tag(block, "title") {
-                titles.push(title);
+                out.push((title, extract_item_date(block)));
             }
         }
     }
-    titles
+    out
+}
+
+/// Extrai e parseia a data de publicação de um item: tenta <pubDate> (RSS,
+/// formato RFC 2822 — "Fri, 24 Jul 2026 15:08:26 GMT"), depois <published> e
+/// <updated> (Atom, RFC 3339 — "2026-07-24T04:09:18+00:00"). Validado contra
+/// amostras reais capturadas de Bloomberg/WSJ/FT/Reuters/Truth Social.
+fn extract_item_date(block: &str) -> Option<DateTime<Utc>> {
+    for tag in ["pubDate", "published", "updated"] {
+        if let Some(raw) = extract_tag(block, tag) {
+            let raw = raw.trim();
+            if let Ok(dt) = DateTime::parse_from_rfc2822(raw) {
+                return Some(dt.with_timezone(&Utc));
+            }
+            if let Ok(dt) = DateTime::parse_from_rfc3339(raw) {
+                return Some(dt.with_timezone(&Utc));
+            }
+        }
+    }
+    None
 }
 
 /// Como `extract_titles`, mas quando o <title> de um item está vazio ou é o
 /// placeholder padrão de agregadores para post sem legenda (começa com
 /// "[No Title]"), usa o <description> (com tags HTML removidas) no lugar.
 /// Ignora o item só se AMBOS title e description vierem vazios.
+/// (Produção usa `extract_best_text_with_dates` diretamente; esta versão sem
+/// data existe só para manter o teste abaixo simples de ler.)
+#[cfg(test)]
 fn extract_best_text(xml: &str) -> Vec<String> {
+    extract_best_text_with_dates(xml).into_iter().map(|(t, _)| t).collect()
+}
+
+/// Como `extract_best_text`, mas também extrai a data real de publicação —
+/// ver `extract_item_date`.
+fn extract_best_text_with_dates(xml: &str) -> Vec<(String, Option<DateTime<Utc>>)> {
     let mut out = Vec::new();
     for (open, close) in [("<item", "</item>"), ("<entry", "</entry>")] {
         for chunk in xml.split(open).skip(1) {
@@ -333,7 +409,7 @@ fn extract_best_text(xml: &str) -> Vec<String> {
                     .unwrap_or_default()
             };
             if !text.trim().is_empty() {
-                out.push(text);
+                out.push((text, extract_item_date(block)));
             }
         }
     }
@@ -459,6 +535,68 @@ mod tests {
     }
 
     #[test]
+    fn extrai_data_real_formatos_rss_e_atom() {
+        // Amostras REAIS capturadas de Bloomberg/WSJ/FT/Reuters/Truth Social.
+        let block_rss_gmt = "<pubDate>Thu, 23 Jul 2026 22:06:16 GMT</pubDate>";
+        let block_rss_offset = "<pubDate>Fri, 24 Jul 2026 04:09:38 +0000</pubDate>";
+        let block_atom = "<published>2026-07-24T04:09:18+00:00</published>";
+        assert_eq!(
+            extract_item_date(block_rss_gmt),
+            Some("2026-07-23T22:06:16Z".parse().unwrap())
+        );
+        assert_eq!(
+            extract_item_date(block_rss_offset),
+            Some("2026-07-24T04:09:38Z".parse().unwrap())
+        );
+        assert_eq!(
+            extract_item_date(block_atom),
+            Some("2026-07-24T04:09:18Z".parse().unwrap())
+        );
+        assert_eq!(extract_item_date("<title>sem data</title>"), None);
+    }
+
+    #[test]
+    fn is_fresh_enough_rejeita_noticia_velha_aceita_recente_e_sem_data() {
+        std::env::set_var("MAX_NEWS_AGE_HOURS", "24");
+        let now: DateTime<Utc> = "2026-07-31T10:00:00Z".parse().unwrap();
+
+        // Caso real que motivou este teste: item do feed do WSJ datado de
+        // janeiro de 2025 (mais de um ano antes de "agora") — sem o filtro,
+        // isso seria exibido como notícia "de agora".
+        let muito_velha: DateTime<Utc> = "2025-01-27T19:27:15Z".parse().unwrap();
+        assert!(!is_fresh_enough(Some(muito_velha), now));
+
+        // "Hoje é 31/07" — notícia de 29/07 (48h atrás) também deve ser
+        // rejeitada com a janela padrão de 24h (era exatamente a reclamação
+        // do usuário: notícia de 2 dias atrás sendo exibida como fresca).
+        let dois_dias_atras = now - chrono::Duration::hours(48);
+        assert!(!is_fresh_enough(Some(dois_dias_atras), now));
+
+        // Notícia de 2h atrás: dentro da janela, deve passar.
+        let duas_horas_atras = now - chrono::Duration::hours(2);
+        assert!(is_fresh_enough(Some(duas_horas_atras), now));
+
+        // Sem data conhecida: não dá pra provar que é velha, deixa passar.
+        assert!(is_fresh_enough(None, now));
+
+        std::env::remove_var("MAX_NEWS_AGE_HOURS");
+    }
+
+    #[test]
+    fn extract_titles_with_dates_preserva_a_data_de_cada_item() {
+        let xml = r#"<rss><channel>
+            <item><title>CPI acima do esperado</title><pubDate>Fri, 24 Jul 2026 12:00:00 GMT</pubDate></item>
+            <item><title>Nota antiga sem relevancia</title><pubDate>Mon, 27 Jan 2025 14:27:15 -0500</pubDate></item>
+        </channel></rss>"#;
+        let items = extract_titles_with_dates(xml);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].0, "CPI acima do esperado");
+        assert_eq!(items[0].1, Some("2026-07-24T12:00:00Z".parse().unwrap()));
+        // "Mon, 27 Jan 2025 14:27:15 -0500" == 19:27:15 UTC no mesmo dia.
+        assert_eq!(items[1].1, Some("2025-01-27T19:27:15Z".parse().unwrap()));
+    }
+
+    #[test]
     fn base_origin_extrai_esquema_e_host() {
         assert_eq!(base_origin("https://exemplo.com/pagina?x=1"), "https://exemplo.com");
         assert_eq!(base_origin("http://a.b.com"), "http://a.b.com");
@@ -478,11 +616,14 @@ mod network_verification {
     #[ignore]
     async fn google_news_url_funciona_via_reqwest_real() {
         let url = "https://news.google.com/rss/search?q=site:reuters.com+(economy+OR+markets+OR+fed+OR+trump+OR+tariff)+when:2d&hl=en-US&gl=US&ceid=US:en";
-        let titles = fetch_titles(url).await.expect("fetch_titles via reqwest real deve funcionar");
-        println!("OK: {} titulos extraidos via reqwest real", titles.len());
-        for t in titles.iter().take(3) {
-            println!("  -> {t}");
+        let items = fetch_titles_with_dates(url)
+            .await
+            .expect("fetch_titles_with_dates via reqwest real deve funcionar");
+        println!("OK: {} titulos extraidos via reqwest real", items.len());
+        for (t, d) in items.iter().take(3) {
+            println!("  -> [{d:?}] {t}");
         }
+        let titles: Vec<&String> = items.iter().map(|(t, _)| t).collect();
         assert!(titles.len() > 5, "esperava vários títulos, veio {}", titles.len());
     }
 }
